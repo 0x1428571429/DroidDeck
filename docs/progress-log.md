@@ -7,6 +7,58 @@ the timeline, then lessons and backlog. Companion to the README (what the app *d
 
 ---
 
+## 2026-09-25 - AYN Thor Steam sign-in A/B and Geometry Wars
+
+- Removed the post-install Steam shutdown/relaunch added by `ebf5da9`. The compatibility tool and
+  default mapping are registered before Steam starts, and the launcher resolves the Proton depot
+  at game launch; reinstalling the client login state after the depot download was unnecessary.
+- Device A/B: baseline session `session-20260925-104908` restarted after Proton finished installing;
+  the second sign-in waited 25.54 s for compat. Treatment session `session-20260925-111921` exercised
+  the missing-manifest branch with the depot payload preserved; tool registration ran before launch,
+  Steam stayed up, and post-logon compat wait was 0.194 s. The user confirmed the treatment load was
+  immediate. This validates removing the extra relogin, not all clean-account/network startup time.
+- Retained the normal compat registrar/refresh, Proton install request and signed-out retry, and
+  Steam's updater exit-code-42 retry. The treatment registered the helper but no third-party Proton
+  archive was available after the fresh app uninstall, so external Proton launchability remains
+  unverified on this install.
+- Geometry Wars (8400) was mapped to `bannerlator-proton-arm64`; Steam invoked its wrapper, Wine 11
+  initialized, and DXVK/Gamescope created the game's surface/swapchain. The user reproduced a hang
+  after launch. No decisive Proton error or clean exit was captured; this is a separate open game
+  compatibility/graphics issue. A later restored-cache run launched Vampire Survivors (1794680)
+  through the same tool to its warning screen at about 62 FPS; the user confirmed it works. This
+  points more strongly to a Geometry Wars-specific issue. See
+  [the device investigation](steam-thor-startup-investigation-2026-09-25.md) for logs and limits.
+- Follow-up with the Proton payload and manifest temporarily moved aside: Steam still signed in
+  quickly, but the session log did not pass `steam://install/4427310` to the client, so the actual
+  no-payload download behavior was not validated. Vampire's refusal occurred during this isolation;
+  the full `Proton Experimental (ARM64)` directory and `StateFlags=4` manifest were restored before
+  the successful Vampire launch. The one-shot test marker was removed.
+- Retest with the real missing-depot state in session `session-20260925-115405`: helper registered
+  and mapped its custom tool before Steam start, passed `steam://install/4427310`, and Steam fetched
+  474.4 MB / staged 2,078,890,587 bytes to `StateFlags=4` without a helper-triggered Steam exit.
+  There was one sign-in, a 0.186978-second post-logon compat wait, and a first frame at 10.1 seconds.
+  After a deliberate Steam/session restart, the custom tool registered again and Vampire Survivors
+  reached its photosensitivity warning through Wine 11 in session `session-20260925-120029`; the
+  user confirmed the launch. The extra-Proton archive check remains open because the fresh install
+  has no third-party archive available. Then fully uninstalled DroidDeck, built `:app:assembleDebug`,
+  checked that the APK embeds the modified session script byte-for-byte, and freshly installed
+  version 0.1.7 (code 8) without opening it; the user then completed QR sign-in and the actual
+  missing-depot Proton download in session `session-20260925-120849`. After the Steam updater's
+  separate `rc=42` restart, Proton reached `Fully Installed` with no post-Proton Steam exit or
+  second login. Katamari (1880620) first failed under Valve's generic Proton Experimental, then
+  launched after the user selected `Bannerlator Proton (ARM64)`. The helper/compat logs confirm the
+  generic FEX+Steam Linux Runtime chain on the failed attempt and the custom wrapper plus DXVK
+  surface on the working attempt. In follow-up session `session-20260925-123244`, Steam logged one
+  normal startup and reached its first frame in about 17 seconds, without a helper-triggered client
+  restart; however, its post-logon compatibility wait lasted 22.587 seconds and login completed
+  about 25 seconds after network logon succeeded. This matches a fresh “Loading user data” spinner
+  and shows the tweak does not remove all slow post-logon waits. The available logs do not isolate
+  which compat callback caused it. No third-party Proton build was present. The full uninstall
+  removed the app-specific SD Steam
+  library. The Proton startup tweak is still local/uncommitted.
+- Validation: `bash -n` on the modified session script, `git diff --check`, and source/asset parity
+  check passed; debug APK build/install and live Thor startup checks passed.
+
 ## 2026-09-24 (afternoon) - main `94f9935`: PS1, controller focus, own signing key, CI hardening
 
 State: **main = `94f9935`** (PR #41 merge), main build run 36036219740 - the first one signed with
