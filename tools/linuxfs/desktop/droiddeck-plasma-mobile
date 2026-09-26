@@ -15,6 +15,7 @@ export QT_QUICK_CONTROLS_MOBILE=1
 export KSCREEN_BACKEND=QScreen
 export KDE_FULL_SESSION=1
 export KDE_SESSION_VERSION=6
+export XDG_MENU_PREFIX=plasma-
 export PLASMA_INTEGRATION_USE_PORTAL=1
 export PLASMA_PLATFORM=phone:handset
 export PLASMA_DEFAULT_SHELL=org.kde.plasma.mobileshell
@@ -73,6 +74,27 @@ dbus-run-session -- env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" plasma_log="$plasma_l
       WAYLAND_DISPLAY=wayland-1 dbus-update-activation-environment WAYLAND_DISPLAY >>"$plasma_log" 2>&1
       echo "== D-Bus activation Wayland display update status $?"
     fi
+    if command -v plasma-mobile-envmanager >/dev/null 2>&1; then
+      echo "== applying Plasma Mobile device settings"
+      QT_QPA_PLATFORM=offscreen plasma-mobile-envmanager --apply-settings >>"$plasma_log" 2>&1
+      echo "== Plasma Mobile environment setup status $?"
+    else
+      echo "== plasma-mobile-envmanager is missing"
+    fi
+    if command -v kbuildsycoca6 >/dev/null 2>&1; then
+      echo "== building KDE service cache"
+      QT_QPA_PLATFORM=offscreen kbuildsycoca6 --noincremental >>"$plasma_log" 2>&1
+      cache_status=$?
+      echo "== KDE service cache status $cache_status"
+      cache_dir=${XDG_CACHE_HOME:-$HOME/.cache}
+      for cache_file in "$cache_dir"/ksycoca6_*; do
+        [ -f "$cache_file" ] || continue
+        # KDE cache files land write-only under this PRoot user and cannot be reopened by service lookups.
+        chmod u+rw "$cache_file" || echo "== could not make KDE cache readable: $cache_file"
+      done
+    else
+      echo "== kbuildsycoca6 is missing"
+    fi
     echo "== starting nested KWin and Plasma Mobile on wayland-0 (${width}x${height}), socket wayland-1"
     KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES="kwin*.debug=true" kwin_wayland \
       --xwayland \
@@ -80,7 +102,7 @@ dbus-run-session -- env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" plasma_log="$plasma_l
       --socket=wayland-1 \
       --width="$width" --height="$height" --fullscreen \
       --no-lockscreen --no-global-shortcuts --no-kactivities \
-      --exit-with-session "plasmashell -p org.kde.plasma.mobileshell" \
+      --exit-with-session "plasmashell -p org.kde.plasma.mobileshell --replace" \
       >>"$plasma_log" 2>&1 &
     kwin_pid=$!
     cleanup() {
