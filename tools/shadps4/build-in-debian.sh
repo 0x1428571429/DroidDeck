@@ -13,7 +13,8 @@ export DEBIAN_FRONTEND=noninteractive
 dpkg --add-architecture arm64
 apt-get update
 # The Bachata runtime's cross set, plus PulseAudio and ALSA headers so SDL3 builds its audio
-# drivers (it loads them at run time; the runtime plays through PulseAudio).
+# drivers (it loads them at run time; the runtime plays through PulseAudio), and the Wayland, EGL
+# and xkbcommon headers with the host's wayland-scanner so it builds its Wayland video driver.
 apt-get install -y --no-install-recommends \
   ca-certificates git curl xz-utils zstd file pkg-config dpkg-dev squashfs-tools \
   cmake ninja-build clang llvm lld gcc g++ make \
@@ -22,6 +23,7 @@ apt-get install -y --no-install-recommends \
   libvulkan-dev libc6-dev \
   libx11-dev:arm64 libxext-dev:arm64 libudev-dev:arm64 uuid-dev:arm64 \
   libpulse-dev:arm64 libasound2-dev:arm64 \
+  libwayland-dev:arm64 libegl-dev:arm64 libxkbcommon-dev:arm64 libwayland-bin \
   libc6:arm64 libgcc-s1:arm64 libstdc++6:arm64 libvulkan1:arm64 libudev1:arm64 libuuid1:arm64 \
   libx11-6:arm64 libxext6:arm64
 git config --global --add safe.directory '*'
@@ -50,6 +52,9 @@ cat "$SRC/runtime/build/shadps4-arm64-stage/needed.txt"
 # SDL3 found the audio drivers the runtime needs.
 grep -E 'SDL_AUDIO_DRIVER_(PULSEAUDIO|ALSA)' "$SRC"/runtime/build/shadps4-arm64/externals/sdl3/include-config-release/build_config/SDL_build_config.h
 grep -q '#define SDL_AUDIO_DRIVER_PULSEAUDIO 1' "$SRC"/runtime/build/shadps4-arm64/externals/sdl3/include-config-release/build_config/SDL_build_config.h
+# ... and both video drivers: X11 under gamescope, Wayland on the desktop.
+grep -q '#define SDL_VIDEO_DRIVER_WAYLAND 1' "$SRC"/runtime/build/shadps4-arm64/externals/sdl3/include-config-release/build_config/SDL_build_config.h
+grep -q '#define SDL_VIDEO_DRIVER_X11 1' "$SRC"/runtime/build/shadps4-arm64/externals/sdl3/include-config-release/build_config/SDL_build_config.h
 # The patch is in.
 grep -aq 'BACHATA_MANAGED' "$BIN"
 
@@ -62,7 +67,16 @@ cat > "$APPDIR/AppRun" <<'RUN'
 # Big Picture game list instead of a usage box.
 # The first time, the ROMs folder's ps4 folder (any case) is added to its game folders so the
 # list is not empty; a folder the player removes later stays removed.
+# Under gamescope (a game session) it stays on gamescope's X server; on the desktop it draws
+# through the compositor's Wayland directly. An SDL_VIDEODRIVER already set wins.
 HERE=$(dirname "$(readlink -f "$0")")
+if [ -z "$SDL_VIDEODRIVER" ]; then
+  if [ -n "$GAMESCOPE_WAYLAND_DISPLAY" ]; then
+    export SDL_VIDEODRIVER=x11
+  elif [ -n "$WAYLAND_DISPLAY" ]; then
+    export SDL_VIDEODRIVER=wayland
+  fi
+fi
 if [ $# -eq 0 ]; then
   MARK="${XDG_DATA_HOME:-$HOME/.local/share}/shadPS4/.droiddeck-games-folder"
   if [ ! -e "$MARK" ]; then
