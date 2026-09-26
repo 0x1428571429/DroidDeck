@@ -39,6 +39,10 @@ for p in $(ls tools/shadps4/patches/*.patch | sort); do
   git -C "$SRC" apply --whitespace=nowarn "$WORK/$p"
 done
 
+# pkg-config answers for the arm64 target, not the x86-64 host: SDL3 finds PulseAudio (libpulse)
+# only through it, and without it builds ALSA alone.
+export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+pkg-config --modversion libpulse
 bash "$SRC/runtime/scripts/build-shadps4-arm64.sh"
 BIN=$SRC/runtime/build/shadps4-arm64-stage/bin/shadps4-arm64
 test -x "$BIN"
