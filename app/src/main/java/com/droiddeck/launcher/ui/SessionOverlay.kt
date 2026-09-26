@@ -209,6 +209,7 @@ class DrawerActions(
     val backActionsInverted: Boolean,
     val touchMode: String,
     val touchAuto: String,
+    val directTouchOnly: Boolean,
     val shapeMode: String,
     val fexPreset: String,
     /** Steam only: games stretched to the screen's size, changed live (null = not Steam). */
@@ -436,7 +437,11 @@ fun SessionDrawer(open: Boolean, page: Int, controllerActive: Boolean, onPageCha
                         }
                         1 -> {
                             SettingsGroup("Controls") {
-                                ChoiceRow(host, "touch", "Touch", null,
+                                if (a.directTouchOnly) {
+                                    SettingsRow("Touch", "Direct input to the screen") {
+                                        Text("Direct", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = colors.onBackground)
+                                    }
+                                } else ChoiceRow(host, "touch", "Touch", null,
                                     listOf(SessionPrefs.TOUCH_AUTO to "Auto (${a.touchAuto})", SessionPrefs.TOUCH_PAD to "Touchpad", SessionPrefs.TOUCH_DIRECT to "Direct"),
                                     a.touchMode, chipModifier = focus.track(page, "touch"), onPick = a.onTouch)
                                 ChoiceRow(host, "osc", "On-screen controls", null,

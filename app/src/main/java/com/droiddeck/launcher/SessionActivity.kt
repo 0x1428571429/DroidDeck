@@ -298,6 +298,7 @@ open class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                         frameGenEngine = frameGenEngine, frameGenMultiplier = frameGenMultiplier,
                         lsfgReady = LsfgNative.isInstalled(this@SessionActivity),
                         oscMode = oscMode, suspendPolicy = suspendPolicy, touchMode = touchMode,
+                        directTouchOnly = SessionProcess.isExternalDisplay(this@SessionActivity),
                         touchAuto = if (usingTouchpad()) "touchpad" else "direct",
                         shapeMode = shapeMode, fexPreset = fexPreset,
                         secondScreenMode = secondScreenMode,
@@ -465,7 +466,8 @@ open class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
     private fun readPrefs() {
         hudOn = SessionPrefs.hudEnabled(this)
         fillScreen = SessionPrefs.forceFullscreen(this)
-        touchMode = SessionPrefs.touchMode(this)
+        touchMode = if (SessionProcess.isExternalDisplay(this)) SessionPrefs.TOUCH_DIRECT
+            else SessionPrefs.touchMode(this)
         frameGenLabel = FrameGen.label(this)
         frameGenEngine = FrameGen.engine(this)
         frameGenMultiplier = FrameGen.multiplier(this)
@@ -1284,11 +1286,14 @@ open class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         if (reset) secondScreenMode = SecondScreenMode.NONE
     }
 
-    /** Touchpad on the desktop, direct in Steam, unless the drawer says otherwise. */
-    private fun usingTouchpad(): Boolean = when (SessionPrefs.touchMode(this)) {
-        SessionPrefs.TOUCH_PAD -> true
-        SessionPrefs.TOUCH_DIRECT -> false
-        else -> SessionState.mode != SessionService.MODE_STEAM || SessionState.steamUi == "desktop"
+    /** Direct touch on external desktops; otherwise use the user's touch setting. */
+    private fun usingTouchpad(): Boolean {
+        if (SessionProcess.isExternalDisplay(this)) return false
+        return when (SessionPrefs.touchMode(this)) {
+            SessionPrefs.TOUCH_PAD -> true
+            SessionPrefs.TOUCH_DIRECT -> false
+            else -> SessionState.mode != SessionService.MODE_STEAM || SessionState.steamUi == "desktop"
+        }
     }
 
     /** The picture's rectangle inside the view: where the pointer may go. */
