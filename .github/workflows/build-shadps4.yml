@@ -25,6 +25,20 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
+      # Compiler and package caches carried between runs; a run with the same pin and patches
+      # recompiles only what changed.
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: shadps4-ccache-${{ hashFiles('tools/shadps4/source.env') }}-${{ github.run_id }}
+          restore-keys: |
+            shadps4-ccache-${{ hashFiles('tools/shadps4/source.env') }}-
+            shadps4-ccache-
+      - uses: actions/cache@v4
+        with:
+          path: .apt-cache
+          key: shadps4-apt-${{ hashFiles('tools/shadps4/build-in-debian.sh') }}
+          restore-keys: shadps4-apt-
       - name: Build in Debian trixie
         run: |
           set -euo pipefail

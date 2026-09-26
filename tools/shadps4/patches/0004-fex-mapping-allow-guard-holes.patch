@@ -1,0 +1,16 @@
+diff --git a/src/core/fex/fex_guest_engine.cpp b/src/core/fex/fex_guest_engine.cpp
+index 2271f97..71ddc6d 100644
+--- a/src/core/fex/fex_guest_engine.cpp
++++ b/src/core/fex/fex_guest_engine.cpp
+@@ -182,7 +182,10 @@ EngineResult<bool> ValidateHostMapping(const GuestExecutionRange& range) {
+                    static_cast<unsigned long>(begin), static_cast<unsigned long>(end), permissions);
+       return Failure(EngineStage::Mapping, EACCES);
+     }
+-    if (range.Writable && (permissions[1] != 'w' || permissions[2] == 'x')) {
++    // A guard hole the guest protected itself (PROT_NONE, "---p") inside a writable range is
++    // the game's own doing, like a stack guard page; FEX never writes there on its behalf.
++    const bool guardHole = permissions[0] == '-' && permissions[1] == '-' && permissions[2] == '-';
++    if (range.Writable && !guardHole && (permissions[1] != 'w' || permissions[2] == 'x')) {
+       std::fprintf(stderr,
+                    "BACHATA_FEX_MAPPING_FAIL reason=host_write_permission error=%d begin=%#lx "
+                    "size=%#lx executable=%d writable=%d host_begin=%#lx host_end=%#lx "

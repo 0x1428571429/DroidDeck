@@ -10,13 +10,21 @@ cd "$WORK"
 . tools/shadps4/source.env
 
 export DEBIAN_FRONTEND=noninteractive
+# Downloaded packages are kept in the workspace (.apt-cache), which the workflow caches between
+# runs; the image's docker-clean hook would otherwise delete them after every install.
+rm -f /etc/apt/apt.conf.d/docker-clean
+mkdir -p "$WORK/.apt-cache/archives/partial"
+cat > /etc/apt/apt.conf.d/99droiddeck-cache <<'APT'
+Dir::Cache::archives "/work/.apt-cache/archives";
+Binary::apt::APT::Keep-Downloaded-Packages "true";
+APT
 dpkg --add-architecture arm64
 apt-get update
 # The Bachata runtime's cross set, plus PulseAudio and ALSA headers so SDL3 builds its audio
 # drivers (it loads them at run time; the runtime plays through PulseAudio), and the Wayland, EGL
 # and xkbcommon headers with the host's wayland-scanner so it builds its Wayland video driver.
 apt-get install -y --no-install-recommends \
-  ca-certificates git curl xz-utils zstd file pkg-config dpkg-dev squashfs-tools \
+  ca-certificates git curl xz-utils zstd file pkg-config dpkg-dev squashfs-tools ccache \
   cmake ninja-build clang llvm lld gcc g++ make \
   gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
   python3 nodejs \
@@ -45,7 +53,14 @@ done
 # only through it, and without it builds ALSA alone.
 export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
 pkg-config --modversion libpulse
+# Every CMake project the build configures (FEXCore, shadPS4 and its externals) compiles through
+# ccache; the cache lives in the workspace (.ccache) and the workflow keeps it between runs.
+export CCACHE_DIR=$WORK/.ccache CCACHE_BASEDIR=$WORK CCACHE_NOHASHDIR=1 \
+  CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=4G \
+  CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache
+ccache -z
 bash "$SRC/runtime/scripts/build-shadps4-arm64.sh"
+ccache -s
 BIN=$SRC/runtime/build/shadps4-arm64-stage/bin/shadps4-arm64
 test -x "$BIN"
 cat "$SRC/runtime/build/shadps4-arm64-stage/needed.txt"
