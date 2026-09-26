@@ -27,14 +27,14 @@ jobs:
       - uses: actions/checkout@v4
       # Compiler and package caches carried between runs; a run with the same pin and patches
       # recompiles only what changed.
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: .ccache
           key: shadps4-ccache-${{ hashFiles('tools/shadps4/source.env') }}-${{ github.run_id }}
           restore-keys: |
             shadps4-ccache-${{ hashFiles('tools/shadps4/source.env') }}-
             shadps4-ccache-
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
         with:
           path: .apt-cache
           key: shadps4-apt-${{ hashFiles('tools/shadps4/build-in-debian.sh') }}
@@ -45,6 +45,17 @@ jobs:
           df -h /
           docker run --rm -v "$PWD:/work" -w /work debian:trixie bash tools/shadps4/build-in-debian.sh
           sudo chown -R "$(id -u):$(id -g)" .
+      # Saved even when the build fails or is cancelled: whatever was compiled is kept.
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .ccache
+          key: shadps4-ccache-${{ hashFiles('tools/shadps4/source.env') }}-${{ github.run_id }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .apt-cache
+          key: shadps4-apt-${{ hashFiles('tools/shadps4/build-in-debian.sh') }}
       - uses: actions/upload-artifact@v4
         with:
           name: shadps4-appimage
