@@ -67,8 +67,14 @@ dbus-run-session -- env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" plasma_log="$plasma_l
     width=${BL_WIDTH:-1280}
     height=${BL_HEIGHT:-720}
     rm -f "$XDG_RUNTIME_DIR/wayland-1" "$XDG_RUNTIME_DIR/wayland-1.lock"
+    # D-Bus activation inherited the outer compositor socket. KDE services activated later must
+    # connect to the nested socket, while KWin itself continues to connect to the outer one.
+    if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+      WAYLAND_DISPLAY=wayland-1 dbus-update-activation-environment WAYLAND_DISPLAY >>"$plasma_log" 2>&1
+      echo "== D-Bus activation Wayland display update status $?"
+    fi
     echo "== starting nested KWin and Plasma Mobile on wayland-0 (${width}x${height}), socket wayland-1"
-    QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES='kwin*.debug=true' kwin_wayland \
+    KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES="kwin*.debug=true" kwin_wayland \
       --xwayland \
       --wayland-display=wayland-0 \
       --socket=wayland-1 \
