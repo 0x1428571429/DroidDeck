@@ -166,7 +166,7 @@ object DeviceReport {
         h("Device switch files in Download")
         for (name in listOf("droiddeck-env", "droiddeck-tu-debug", "droiddeck-driver",
                             "droiddeck-osc", "droiddeck-no-pad", "droiddeck-pad-log",
-                            "droiddeck-no-hud", "droiddeck-wlr-renderer")) {
+                            "droiddeck-no-hud", "droiddeck-wlr-renderer", "droiddeck-catalog-url")) {
             val f = File(Environment.getExternalStorageDirectory(), "Download/$name")
             if (f.isFile) k(name, FileUtils.readString(f)?.trim()?.replace('\n', ' ')?.ifEmpty { "(present, empty)" } ?: "(present)")
         }

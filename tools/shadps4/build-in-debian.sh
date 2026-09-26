@@ -56,8 +56,20 @@ cat > "$APPDIR/AppRun" <<'RUN'
 #!/bin/sh
 # shadPS4 is a command-line emulator; opened from a menu with nothing to run, it shows its own
 # Big Picture game list instead of a usage box.
+# The first time, the ROMs folder's ps4 folder (any case) is added to its game folders so the
+# list is not empty; a folder the player removes later stays removed.
 HERE=$(dirname "$(readlink -f "$0")")
-[ $# -eq 0 ] && set -- --big-picture
+if [ $# -eq 0 ]; then
+  MARK="${XDG_DATA_HOME:-$HOME/.local/share}/shadPS4/.droiddeck-games-folder"
+  if [ ! -e "$MARK" ]; then
+    for d in /root/ROMs/*; do
+      case "$(basename "$d" | tr 'A-Z' 'a-z')" in
+        ps4) [ -d "$d" ] && "$HERE/usr/bin/shadps4" --add-game-folder "$d" && mkdir -p "$(dirname "$MARK")" && : > "$MARK" ;;
+      esac
+    done
+  fi
+  set -- --big-picture
+fi
 exec "$HERE/usr/bin/shadps4" "$@"
 RUN
 chmod 755 "$APPDIR/AppRun"

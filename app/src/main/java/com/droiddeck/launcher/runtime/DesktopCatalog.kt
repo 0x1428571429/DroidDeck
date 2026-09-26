@@ -26,8 +26,18 @@ object DesktopCatalog {
         val icon: String, val category: String,
     )
 
+    /**
+     * The catalog to read: Download/droiddeck-catalog-url (one https URL) points this device alone
+     * at another one - a catalog branch with a package that is not live for everyone yet.
+     */
+    private fun catalogUrl(): String {
+        val override = File(android.os.Environment.getExternalStorageDirectory(), "Download/droiddeck-catalog-url")
+            .takeIf { it.isFile }?.let { FileUtils.readString(it)?.trim()?.lineSequence()?.firstOrNull()?.trim() }
+        return override?.takeIf { it.startsWith("https://") }?.also { Log.i(TAG, "catalog override: $it") } ?: CATALOG_URL
+    }
+
     fun fetch(): List<Entry>? {
-        val body = Downloader.downloadString(CATALOG_URL) ?: return null
+        val body = Downloader.downloadString(catalogUrl()) ?: return null
         return try {
             val json = JSONObject(body)
             val arr = json.getJSONArray("packages")
