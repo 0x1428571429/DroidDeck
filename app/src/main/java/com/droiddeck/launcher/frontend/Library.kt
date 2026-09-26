@@ -21,7 +21,7 @@ object Library {
         val iconRes: Int get() = when (id) {
             "rpcs3" -> R.drawable.emu_rpcs3; "armsx2" -> R.drawable.emu_pcsx2; "dolphin" -> R.drawable.emu_dolphin
             "duckstation" -> R.drawable.emu_duckstation; "melonds" -> R.drawable.emu_melonds; "cemu" -> R.drawable.emu_cemu
-            "ppsspp" -> R.drawable.emu_ppsspp; else -> R.drawable.emu_retroarch
+            "ppsspp" -> R.drawable.emu_ppsspp; "shadps4" -> R.drawable.emu_shadps4; else -> R.drawable.emu_retroarch
         }
     }
 
@@ -98,6 +98,9 @@ object Library {
     private class Spec(val id: String, val name: String, val system: String, val program: String, val folders: List<String>, val exts: Set<String>, val atPanel: Boolean = false)
     private val specs = listOf(
         Spec("rpcs3", "RPCS3", "PS3", "/opt/appimages/rpcs3.AppImage", listOf("ps3"), setOf("iso")),
+        // PS4: shadPS4's ARM64 build, FEXCore running the console's x86-64 code. A game is a
+        // dumped folder (eboot.bin + sce_sys), not an image file, so it has no extensions.
+        Spec("shadps4", "shadPS4", "PS4", "/opt/appimages/shadps4.AppImage", listOf("ps4"), emptySet()),
         // PS2: ARMSX2, the PCSX2 fork with ARM64 recompilers. Upstream PCSX2 interprets the PS2's
         // CPUs on ARM64 (NFS Underground 2: 17 fps against ARMSX2's full 60), so it is not offered.
         Spec("armsx2", "ARMSX2", "PS2", "/opt/appimages/armsx2.AppImage", listOf("ps2"), setOf("iso", "chd", "cso", "gz")),
@@ -120,7 +123,7 @@ object Library {
     private val systemFolders: Set<String> by lazy { specs.flatMap { it.folders }.toSet() }
     private val installedIds = mapOf(
         "rpcs3" to "rpcs3", "armsx2" to "armsx2", "dolphin" to "dolphin", "duckstation" to "duckstation",
-        "melonds" to "melonds", "cemu" to "cemu", "ppsspp" to "emulators", "retroarch" to "emulators",
+        "melonds" to "melonds", "cemu" to "cemu", "shadps4" to "shadps4", "ppsspp" to "emulators", "retroarch" to "emulators",
     )
 
     /** The emulator's name for a program path from the rail ("ARMSX2"), or null. */
@@ -142,7 +145,7 @@ object Library {
         val romsRoot = SessionPrefs.romsDir(context).takeIf { it.isNotEmpty() }?.let(::File)?.takeIf { it.isDirectory }
         return specs.map { spec ->
             val games = ArrayList<Rom>()
-            if (romsRoot != null && spec.exts.isNotEmpty()) {
+            if (romsRoot != null && (spec.exts.isNotEmpty() || spec.id == "shadps4")) {
                 // The system's folder(s), matched without regard to case, and up to three folders
                 // inside them - a dump usually comes as a folder named for the game with the image
                 // inside it, and people sort those into folders of their own (ps2/games/<game>/).
@@ -162,6 +165,20 @@ object Library {
                         games.add(Rom(displayTitle(dir.name), dir, "/root/ROMs/$rel", spec.id,
                             // The dump carries its own art, as an installed package does.
                             art = File(dir, "PS3_GAME/ICON0.PNG").takeIf { it.isFile }))
+                        continue
+                    }
+                    // A PS4 dump is a folder with eboot.bin and sce_sys/param.sfo; its update and
+                    // patch folders (CUSA00001-UPDATE, -patch) have both too and go with the game.
+                    if (spec.id == "shadps4") {
+                        val eboot = File(dir, "eboot.bin")
+                        val upper = dir.name.uppercase()
+                        if (eboot.isFile && !upper.endsWith("-UPDATE") && !upper.endsWith("-PATCH")) {
+                            val sfo = File(dir, "sce_sys/param.sfo")
+                            val title = if (sfo.isFile) readSfo(sfo)["TITLE"]?.trim()?.takeIf { it.isNotEmpty() } else null
+                            val rel = eboot.relativeTo(romsRoot).path
+                            games.add(Rom(title ?: displayTitle(dir.name), dir, "/root/ROMs/$rel", spec.id,
+                                art = File(dir, "sce_sys/icon0.png").takeIf { it.isFile }))
+                        }
                         continue
                     }
                     val files = dir.listFiles()?.sortedBy { it.name.lowercase() }.orEmpty()
@@ -225,7 +242,7 @@ object Library {
         } ?: emptyList()
     }
 
-    /** The string fields of a PARAM.SFO (the PSP/PS3 metadata file): a small binary table. */
+    /** The string fields of a PARAM.SFO (the PSP/PS3/PS4 metadata file): a small binary table. */
     private fun readSfo(file: File): Map<String, String> {
         val out = HashMap<String, String>()
         try {
@@ -279,6 +296,8 @@ object Library {
             "-e", guestPath,
         )
         "cemu" -> listOf("-g", guestPath)
+        // shadPS4 (src/main.cpp): -g the game's eboot.bin, -f full screen.
+        "shadps4" -> listOf("-f", "true", "-g", guestPath)
         // Full screen (CLI.cpp --fullscreen); the guide button leaves it for melonDS's menus and
         // comes back (HK_FullscreenToggle, bannerlator-pad-defaults).
         "melonds" -> listOf("-f", guestPath)
