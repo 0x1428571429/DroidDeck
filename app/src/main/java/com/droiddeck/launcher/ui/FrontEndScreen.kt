@@ -964,7 +964,7 @@ private fun Content(
                 }
                 Rise(4) { SectionTitle("Emulators", "${s.emulators.count { it.installed }} installed · ${s.emulators.count { !it.installed }} available") }
                 Rise(5, Modifier.weight(1f).fillMaxWidth()) {
-                    ArtGrid(s.emulators.map { e -> Tile(e.name, if (e.installed) (if (e.id == "retroarch") null else "${e.games.size} game${if (e.games.size == 1) "" else "s"}") else "Select to install", null, "emu:${e.id}", e.iconRes, dim = !e.installed) { onSelect("emu:${e.id}") } })
+                    ArtGrid(s.emulators.map { e -> Tile(e.name, if (e.installed) (if (e.id == "retroarch") null else "${e.games.size} game${if (e.games.size == 1) "" else "s"}") else "Select to install", null, "emu:${e.id}", e.iconRes.takeIf { e.icon == null }, dim = !e.installed, iconBitmap = e.icon) { onSelect("emu:${e.id}") } })
                 }
             }
             selected == "setup" -> SetupPanel(s, a, onOpenDeveloperOptions, onRequestWirelessAdb)
@@ -983,7 +983,7 @@ private fun Content(
                     if (e.installed) {
                         Rise(3) {
                             Actions {
-                                Image(painterResource(e.iconRes), null, modifier = Modifier.size(40.dp))
+                                EmulatorIcon(e)
                                 PrimaryButton("Open ${e.name}", enabled = s.ready && !s.busy, main = true) { a.onEmulator(e) }
                                 SecondaryButton("ROMs folder", onClick = a.onRoms)
                                 if (pkg != null) SecondaryButton(
@@ -1001,12 +1001,12 @@ private fun Content(
                             )
                         }
                         else Rise(5, Modifier.weight(1f).fillMaxWidth()) {
-                            ArtGrid(e.games.mapIndexed { index, g -> Tile(g.name, if (g.art != null) "installed" else g.hostPath.extension.uppercase().ifEmpty { "folder" }, g.art, "rom:${e.id}:$index", e.iconRes) { onSelect("rom:${e.id}:$index") } }, wide = e.games.none { it.art != null })
+                            ArtGrid(e.games.mapIndexed { index, g -> Tile(g.name, if (g.art != null) "installed" else g.hostPath.extension.uppercase().ifEmpty { "folder" }, g.art, "rom:${e.id}:$index", e.iconRes.takeIf { e.icon == null }, iconBitmap = e.icon) { onSelect("rom:${e.id}:$index") } }, wide = e.games.none { it.art != null })
                         }
                     } else {
                         if (pkg != null) Rise(2) {
                             Actions {
-                                Image(painterResource(e.iconRes), null, modifier = Modifier.size(40.dp))
+                                EmulatorIcon(e)
                                 PrimaryButton(
                                     if (s.packageBusyId == pkg.id) "Installing…" else "Install ${e.name}",
                                     enabled = s.packageBusyId == null && s.ready && !s.packageCatalogLoading && !s.sessionRunning,
@@ -1060,7 +1060,7 @@ private fun Content(
                                 Text(g.guestPath, fontSize = 12.sp, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(colors.surface).padding(horizontal = 10.dp, vertical = 6.dp))
                                 Spacer(Modifier.height(14.dp))
                                 Actions {
-                                    Image(painterResource(e.iconRes), null, modifier = Modifier.size(40.dp))
+                                    EmulatorIcon(e)
                                     PrimaryButton("Launch in ${e.name}", enabled = s.ready && !s.busy, main = true) { a.onRom(g) }
                                     Chip(g.hostPath.extension.uppercase().ifEmpty { "folder" }, ok = false)
                                 }
@@ -1074,7 +1074,7 @@ private fun Content(
                         Rise(4, Modifier.weight(1f).fillMaxWidth()) {
                             ArtGrid(others.map { x ->
                                 val index = e.games.indexOf(x)
-                                Tile(x.name, if (x.art != null) "installed" else x.hostPath.extension.uppercase().ifEmpty { "folder" }, x.art, "rom:${e.id}:$index", e.iconRes) { onSelect("rom:${e.id}:$index") }
+                                Tile(x.name, if (x.art != null) "installed" else x.hostPath.extension.uppercase().ifEmpty { "folder" }, x.art, "rom:${e.id}:$index", e.iconRes.takeIf { e.icon == null }, iconBitmap = e.icon) { onSelect("rom:${e.id}:$index") }
                             }, wide = others.none { it.art != null })
                         }
                     }
@@ -1442,6 +1442,14 @@ private fun CoverImage(art: File, modifier: Modifier) {
             modifier = Modifier.fillMaxSize(),
         )
     }
+}
+
+/** An emulator's icon in its page's header: the catalog's own, else the bundled one. */
+@Composable
+private fun EmulatorIcon(e: Library.Emulator) {
+    val icon = e.icon
+    if (icon != null) Image(bitmap = icon.asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp))
+    else Image(painterResource(e.iconRes), null, modifier = Modifier.size(40.dp))
 }
 
 @Composable

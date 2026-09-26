@@ -1,7 +1,11 @@
 package com.droiddeck.launcher.frontend
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import com.droiddeck.launcher.R
+import com.droiddeck.launcher.core.Downloader
+import com.droiddeck.launcher.runtime.DesktopCatalog
 import com.droiddeck.launcher.runtime.LinuxRuntime
 import com.droiddeck.launcher.session.GameStorage
 import com.droiddeck.launcher.session.SessionPrefs
@@ -16,12 +20,13 @@ object Library {
     /** [gameId] is what steam://rungameid/ takes: the appid for a Steam title, the shortcut id for an added game. */
     class SteamGame(val appId: Int, val name: String, val art: File?, val library: String, val gameId: Long = appId.toLong())
     class Rom(val name: String, val hostPath: File, val guestPath: String, val emulatorId: String, val art: File? = null)
-    class Emulator(val id: String, val name: String, val system: String, val program: String, val installed: Boolean, val games: List<Rom>) {
+    /** [icon]: a catalog emulator's own icon (its row's iconUrl); the built-in ones are resources. */
+    class Emulator(val id: String, val name: String, val system: String, val program: String, val installed: Boolean, val games: List<Rom>, val icon: Bitmap? = null) {
         /** The emulator's own icon, bundled (the runtime keeps them as theme SVGs the app cannot draw). */
         val iconRes: Int get() = when (id) {
             "rpcs3" -> R.drawable.emu_rpcs3; "armsx2" -> R.drawable.emu_pcsx2; "dolphin" -> R.drawable.emu_dolphin
             "duckstation" -> R.drawable.emu_duckstation; "melonds" -> R.drawable.emu_melonds; "cemu" -> R.drawable.emu_cemu
-            "ppsspp" -> R.drawable.emu_ppsspp; "shadps4" -> R.drawable.emu_shadps4; else -> R.drawable.emu_retroarch
+            "ppsspp" -> R.drawable.emu_ppsspp; else -> R.drawable.emu_retroarch
         }
     }
 
@@ -94,13 +99,21 @@ object Library {
             .firstOrNull { it.isFile && it.length() > 0L }
     }
 
-    /** [atPanel]: frames cheap enough to draw at the panel's own size (see [drawsAtPanel]). */
-    private class Spec(val id: String, val name: String, val system: String, val program: String, val folders: List<String>, val exts: Set<String>, val atPanel: Boolean = false)
+    /**
+     * [atPanel]: frames cheap enough to draw at the panel's own size (see [drawsAtPanel]).
+     * [gameFile]: a game is a folder holding this file (a PS4 dump's eboot.bin), not an image
+     * file; the file is what boots, [titleSfo] names it and [artPath] is its art, both relative to
+     * the folder, and a folder ending in one of [skipSuffixes] (an update beside the game) is not
+     * a game. [args]: the command line, {game} standing for the game. The last four and
+     * [iconUrl] come from a catalog row (see [fromCatalog]).
+     */
+    private class Spec(
+        val id: String, val name: String, val system: String, val program: String, val folders: List<String>, val exts: Set<String>,
+        val atPanel: Boolean = false, val gameFile: String? = null, val skipSuffixes: List<String> = emptyList(),
+        val titleSfo: String? = null, val artPath: String? = null, val args: List<String>? = null, val iconUrl: String? = null,
+    )
     private val specs = listOf(
         Spec("rpcs3", "RPCS3", "PS3", "/opt/appimages/rpcs3.AppImage", listOf("ps3"), setOf("iso")),
-        // PS4: shadPS4's ARM64 build, FEXCore running the console's x86-64 code. A game is a
-        // dumped folder (eboot.bin + sce_sys), not an image file, so it has no extensions.
-        Spec("shadps4", "shadPS4", "PS4", "/opt/appimages/shadps4.AppImage", listOf("ps4"), emptySet()),
         // PS2: ARMSX2, the PCSX2 fork with ARM64 recompilers. Upstream PCSX2 interprets the PS2's
         // CPUs on ARM64 (NFS Underground 2: 17 fps against ARMSX2's full 60), so it is not offered.
         Spec("armsx2", "ARMSX2", "PS2", "/opt/appimages/armsx2.AppImage", listOf("ps2"), setOf("iso", "chd", "cso", "gz")),
@@ -119,15 +132,58 @@ object Library {
     private fun displayTitle(name: String): String =
         name.replace(Regex("\\s*[(\\[][^)\\]]*[)\\]]"), "").trim().ifEmpty { name }
 
-    /** Every system folder name the specs claim, so a loose-file scan of the root skips them. */
-    private val systemFolders: Set<String> by lazy { specs.flatMap { it.folders }.toSet() }
+    /** The emulators the catalog describes that the app has no tile of its own for (the last read). */
+    @Volatile private var catalogSpecs: List<Spec> = emptyList()
+    private fun allSpecs() = specs + catalogSpecs
+
+    /**
+     * A catalog row's "frontend" block as a tile: {"system": "PS4", "folders": ["ps4"],
+     * "exts": [...] or "gameFile": "eboot.bin", "skipSuffixes": [...], "titleSfo": ..., "art": ...,
+     * "args": ["-g", "{game}"], "iconUrl": ..., "program": ..., "atPanel": false}. The program
+     * defaults to where the catalog puts an appimage.
+     */
+    private fun fromCatalog(entries: List<DesktopCatalog.Entry>): List<Spec> {
+        val builtIn = specs.map { it.id }.toSet()
+        fun strings(a: org.json.JSONArray?) = a?.let { arr -> (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotEmpty() } }
+        return entries.mapNotNull { e ->
+            val f = e.frontend ?: return@mapNotNull null
+            if (e.id in builtIn) return@mapNotNull null
+            runCatching {
+                Spec(
+                    e.id, e.name, f.optString("system", e.name),
+                    f.optString("program", "").ifEmpty { "/opt/appimages/${e.id}.AppImage" },
+                    strings(f.optJSONArray("folders")).orEmpty().map { it.lowercase() },
+                    strings(f.optJSONArray("exts")).orEmpty().map { it.lowercase() }.toSet(),
+                    atPanel = f.optBoolean("atPanel", false),
+                    gameFile = f.optString("gameFile", "").ifEmpty { null },
+                    skipSuffixes = strings(f.optJSONArray("skipSuffixes")).orEmpty().map { it.uppercase() },
+                    titleSfo = f.optString("titleSfo", "").ifEmpty { null },
+                    artPath = f.optString("art", "").ifEmpty { null },
+                    args = strings(f.optJSONArray("args")),
+                    iconUrl = f.optString("iconUrl", "").takeIf { it.startsWith("https://") },
+                )
+            }.getOrNull()
+        }
+    }
+
+    /** A catalog emulator's icon, kept in files/emu-icons once fetched. */
+    private fun catalogIcon(context: Context, spec: Spec): Bitmap? {
+        val url = spec.iconUrl ?: return null
+        val file = File(context.filesDir, "emu-icons/${spec.id}.png")
+        if (!file.isFile || file.length() == 0L) {
+            file.parentFile?.mkdirs()
+            val part = File(file.path + ".part")
+            if (!Downloader.downloadFile(url, part, false, null) || !part.renameTo(file)) { part.delete(); return null }
+        }
+        return runCatching { BitmapFactory.decodeFile(file.path) }.getOrNull()
+    }
     private val installedIds = mapOf(
         "rpcs3" to "rpcs3", "armsx2" to "armsx2", "dolphin" to "dolphin", "duckstation" to "duckstation",
         "melonds" to "melonds", "cemu" to "cemu", "shadps4" to "shadps4", "ppsspp" to "emulators", "retroarch" to "emulators",
     )
 
     /** The emulator's name for a program path from the rail ("ARMSX2"), or null. */
-    fun nameForProgram(program: String?): String? = specs.firstOrNull { it.program == program }?.name
+    fun nameForProgram(program: String?): String? = allSpecs().firstOrNull { it.program == program }?.name
 
     /**
      * Whether a program from the rail runs at the panel's own resolution rather than the session's
@@ -135,17 +191,24 @@ object Library {
      * nothing, and 720p scaled up to the panel blurs the sharp pixels its screen layout is set
      * up for (bannerlator-pad-defaults).
      */
-    fun drawsAtPanel(program: String?): Boolean = specs.any { it.program == program && it.atPanel }
+    fun drawsAtPanel(program: String?): Boolean = allSpecs().any { it.program == program && it.atPanel }
 
     /** Desktop catalog package that supplies this emulator. */
-    fun packageId(emulatorId: String): String? = installedIds[emulatorId]
+    fun packageId(emulatorId: String): String? = installedIds[emulatorId] ?: catalogSpecs.firstOrNull { it.id == emulatorId }?.id
 
-    /** Every emulator the app knows, installed or not, with the games its system folder holds. */
-    fun emulators(context: Context, installedPackage: (String) -> Boolean): List<Emulator> {
+    /**
+     * Every emulator the app knows, installed or not, with the games its system folder holds:
+     * its own, then those [catalog] describes.
+     */
+    fun emulators(context: Context, catalog: List<DesktopCatalog.Entry>?, installedPackage: (String) -> Boolean): List<Emulator> {
         val romsRoot = SessionPrefs.romsDir(context).takeIf { it.isNotEmpty() }?.let(::File)?.takeIf { it.isDirectory }
-        return specs.map { spec ->
+        if (catalog != null) catalogSpecs = fromCatalog(catalog)
+        val all = allSpecs()
+        // Every system folder name the specs claim, so a loose-file scan of the root skips them.
+        val systemFolders = all.flatMap { it.folders }.toSet()
+        return all.map { spec ->
             val games = ArrayList<Rom>()
-            if (romsRoot != null && (spec.exts.isNotEmpty() || spec.id == "shadps4")) {
+            if (romsRoot != null && (spec.exts.isNotEmpty() || spec.gameFile != null)) {
                 // The system's folder(s), matched without regard to case, and up to three folders
                 // inside them - a dump usually comes as a folder named for the game with the image
                 // inside it, and people sort those into folders of their own (ps2/games/<game>/).
@@ -167,17 +230,17 @@ object Library {
                             art = File(dir, "PS3_GAME/ICON0.PNG").takeIf { it.isFile }))
                         continue
                     }
-                    // A PS4 dump is a folder with eboot.bin and sce_sys/param.sfo; its update and
-                    // patch folders (CUSA00001-UPDATE, -patch) have both too and go with the game.
-                    if (spec.id == "shadps4") {
-                        val eboot = File(dir, "eboot.bin")
+                    // A game that is a folder (a PS4 dump: eboot.bin, sce_sys/param.sfo), booted by
+                    // the file in it.
+                    if (spec.gameFile != null) {
+                        val boot = File(dir, spec.gameFile)
                         val upper = dir.name.uppercase()
-                        if (eboot.isFile && !upper.endsWith("-UPDATE") && !upper.endsWith("-PATCH")) {
-                            val sfo = File(dir, "sce_sys/param.sfo")
-                            val title = if (sfo.isFile) readSfo(sfo)["TITLE"]?.trim()?.takeIf { it.isNotEmpty() } else null
-                            val rel = eboot.relativeTo(romsRoot).path
+                        if (boot.isFile && spec.skipSuffixes.none { upper.endsWith(it) }) {
+                            val sfo = spec.titleSfo?.let { File(dir, it) }?.takeIf { it.isFile }
+                            val title = sfo?.let { readSfo(it)["TITLE"]?.trim()?.takeIf { t -> t.isNotEmpty() } }
+                            val rel = boot.relativeTo(romsRoot).path
                             games.add(Rom(title ?: displayTitle(dir.name), dir, "/root/ROMs/$rel", spec.id,
-                                art = File(dir, "sce_sys/icon0.png").takeIf { it.isFile }))
+                                art = spec.artPath?.let { File(dir, it) }?.takeIf { it.isFile }))
                         }
                         continue
                     }
@@ -199,7 +262,8 @@ object Library {
             if (spec.id == "rpcs3") games.addAll(rpcs3Installed(context))
             // A cover found for the game before (CoverArt) where it has no art of its own.
             val withArt = games.map { g -> if (g.art != null) g else CoverArt.cached(context, g)?.let { Rom(g.name, g.hostPath, g.guestPath, g.emulatorId, it) } ?: g }
-            Emulator(spec.id, spec.name, spec.system, spec.program, installedPackage(installedIds.getValue(spec.id)), withArt)
+            Emulator(spec.id, spec.name, spec.system, spec.program, installedPackage(installedIds[spec.id] ?: spec.id), withArt,
+                catalogIcon(context, spec))
         }
     }
 
@@ -274,7 +338,8 @@ object Library {
     }
 
     /** How the emulator is told which game to boot, on its command line. */
-    fun launchArgs(emulatorId: String, guestPath: String): List<String> = when (emulatorId) {
+    fun launchArgs(emulatorId: String, guestPath: String): List<String> =
+        catalogSpecs.firstOrNull { it.id == emulatorId }?.args?.map { it.replace("{game}", guestPath) } ?: when (emulatorId) {
         "rpcs3" -> listOf("--no-gui", guestPath)
         // Straight into the game in its controller-driven full-screen UI (first-time setup there
         // too), and gone when the game is quit from its pause menu (guide button): -batch.
@@ -296,8 +361,6 @@ object Library {
             "-e", guestPath,
         )
         "cemu" -> listOf("-g", guestPath)
-        // shadPS4 (src/main.cpp): -g the game's eboot.bin, -f full screen.
-        "shadps4" -> listOf("-f", "true", "-g", guestPath)
         // Full screen (CLI.cpp --fullscreen); the guide button leaves it for melonDS's menus and
         // comes back (HK_FullscreenToggle, bannerlator-pad-defaults).
         "melonds" -> listOf("-f", guestPath)

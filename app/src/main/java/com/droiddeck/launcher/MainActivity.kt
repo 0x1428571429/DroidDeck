@@ -576,11 +576,13 @@ class MainActivity : ComponentActivity() {
         if (catalogLoading || catalog != null) return
         catalogLoading = true
         Thread({
-            val fetched = DesktopCatalog.fetch()
+            val fetched = DesktopCatalog.fetch(this)
             ui.post {
                 catalog = fetched
                 catalogLoading = false
                 refreshPackages()
+                // An emulator the catalog describes gets its tile from it (Library).
+                if (fetched?.any { it.frontend != null } == true) refresh()
             }
         }, "catalog-desktop").start()
     }
@@ -1228,16 +1230,18 @@ class MainActivity : ComponentActivity() {
             else -> "Steam"
         } else null
         // The libraries, off the main thread: manifests and a folder scan.
+        val known = catalog
         Thread({
+            val entries = known ?: DesktopCatalog.cached(this)
             val games = if (ready) Library.steamGames(this) + com.droiddeck.launcher.frontend.AddedGames.scan(this).map { g ->
                 com.droiddeck.launcher.frontend.AddedGameArt.resolve(this, g).let { art -> Library.SteamGame(g.appId.toInt(), g.name, art.portrait ?: art.header, "added", g.gameId) }
             } else emptyList()
-            val emus = Library.emulators(this) { id -> DesktopCatalog.installed(this, id) != null }
+            val emus = Library.emulators(this, entries) { id -> DesktopCatalog.installed(this, id) != null }
             ui.post { steamGames = games; emulatorList = emus }
             // Box art for the games that have none, fetched after the list is up; the list is
             // rebuilt once if any was found.
             if (!OfflineMode.enabled(this) && CoverArt.fetchMissing(this, emus.flatMap { it.games })) {
-                val refreshed = Library.emulators(this) { id -> DesktopCatalog.installed(this, id) != null }
+                val refreshed = Library.emulators(this, entries) { id -> DesktopCatalog.installed(this, id) != null }
                 ui.post { emulatorList = refreshed }
             }
         }, "library").start()

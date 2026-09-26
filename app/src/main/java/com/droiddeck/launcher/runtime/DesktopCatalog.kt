@@ -24,7 +24,18 @@ object DesktopCatalog {
         val url: String, val sha256: String, val size: Long, val notes: String,
         /** For an appimage: the icon name and menu category of its .desktop entry. */
         val icon: String, val category: String,
+        /**
+         * How the front end shows an emulator the app has no tile of its own for (Library):
+         * system, folders, exts or gameFile, args with {game}, iconUrl. A new emulator needs only
+         * its catalog row.
+         */
+        val frontend: JSONObject? = null,
     )
+
+    private fun cacheFile(context: Context) = File(context.filesDir, "desktop-catalog.json")
+
+    /** The catalog as last read, for the front end while offline or before the fetch is back. */
+    fun cached(context: Context): List<Entry>? = FileUtils.readString(cacheFile(context))?.let(::parse)
 
     /**
      * The catalog to read: Download/droiddeck-catalog-url (one https URL) points this device alone
@@ -36,8 +47,14 @@ object DesktopCatalog {
         return override?.takeIf { it.startsWith("https://") }?.also { Log.i(TAG, "catalog override: $it") } ?: CATALOG_URL
     }
 
-    fun fetch(): List<Entry>? {
+    fun fetch(context: Context? = null): List<Entry>? {
         val body = Downloader.downloadString(catalogUrl()) ?: return null
+        val entries = parse(body)
+        if (entries != null && context != null) FileUtils.writeString(cacheFile(context), body)
+        return entries
+    }
+
+    private fun parse(body: String): List<Entry>? {
         return try {
             val json = JSONObject(body)
             val arr = json.getJSONArray("packages")
@@ -54,6 +71,7 @@ object DesktopCatalog {
                     o.optString("kind", "tar"), file.getString("url"), file.optString("sha256", ""),
                     file.optLong("size", 0L), o.optString("notes", ""),
                     o.optString("icon", "applications-games"), o.optString("category", "Game"),
+                    o.optJSONObject("frontend"),
                 )
             }
         } catch (e: Exception) {
