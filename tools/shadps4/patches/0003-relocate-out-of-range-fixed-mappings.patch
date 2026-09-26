@@ -1,0 +1,35 @@
+diff --git a/src/core/memory.cpp b/src/core/memory.cpp
+index 7e17cdc..26cac97 100644
+--- a/src/core/memory.cpp
++++ b/src/core/memory.cpp
+@@ -550,6 +550,30 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
+         }
+     }
+ 
++    // A 39-bit Android address space ends far below the top of the PS4's user area, where some
++    // engines ask for fixed mappings (EA's 'EAOSGlobal' at 0xfbffffc000). Place such a mapping at
++    // the top of the range this device has instead of asserting; the caller gets the new address.
++    if (True(flags & MemoryMapFlags::Fixed) && !IsValidMapping(virtual_addr, size)) {
++        const VAddr requested = virtual_addr;
++        const u64 align = alignment > 16_KB ? alignment : 16_KB;
++        const VAddr top = impl.UserVirtualBase() + impl.UserVirtualSize();
++        VAddr candidate = Common::AlignDown(top - size, align);
++        const auto it = FindVMA(candidate);
++        if (it == vma_map.end() || !it->second.IsFree() || !it->second.Contains(candidate, size)) {
++            candidate = SearchFree(DEFAULT_MAPPING_BASE, size, static_cast<u32>(align));
++        }
++        if (candidate == static_cast<VAddr>(-1)) {
++            LOG_ERROR(Kernel_Vmm, "No room to relocate fixed mapping {:#x} ({:#x} bytes)",
++                      requested, size);
++            return ORBIS_KERNEL_ERROR_ENOMEM;
++        }
++        LOG_WARNING(Kernel_Vmm,
++                    "Fixed mapping {:#x} ({:#x} bytes, '{}') is outside this device's address "
++                    "space; relocated to {:#x}",
++                    requested, size, name, candidate);
++        virtual_addr = candidate;
++    }
++
+     if (True(flags & MemoryMapFlags::Fixed) && True(flags & MemoryMapFlags::NoOverwrite)) {
+         // Perform necessary error checking for Fixed & NoOverwrite case
+         ASSERT_MSG(IsValidMapping(virtual_addr, size), "Attempted to access invalid address {:#x}",
