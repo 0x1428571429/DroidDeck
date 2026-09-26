@@ -2,16 +2,22 @@ package com.droiddeck.launcher.runtime;
 
 import android.content.Context;
 import android.os.Process;
+import android.os.StatFs;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.system.StructStat;
 import android.system.StructUtsname;
 
+import com.droiddeck.launcher.core.FileUtils;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -48,6 +54,167 @@ public final class LinuxRuntime {
         return new File(context.getFilesDir(), DIR);
     }
 
+    /** Isolated Arch root used by Plasma Mobile, so its rolling package update cannot change Steam's rootfs. */
+    public static File plasmaRootDir(Context context) {
+        return new File(context.getFilesDir(), DIR + "-plasma-mobile");
+    }
+
+    /**
+     * Creates an independent package root from the installed runtime. This must be a real copy:
+     * package hooks can edit installed files in place, which would modify the Steam root through
+     * hard links. Volatile state and the user's home are kept separate.
+     */
+    public static String preparePlasmaRoot(Context context, LinuxRuntimeInstaller.ProgressListener listener) {
+        File source = rootDir(context);
+        File destination = plasmaRootDir(context);
+        if (!isInstalled(context)) return "The Linux runtime is not installed";
+        if (!new File(source, "usr/bin/labwc").isFile()) return "The Linux desktop package is not installed";
+        String sourceStamp = plasmaSourceStamp(context);
+        File stamp = new File(destination, ".droiddeck-source");
+        if (new File(destination, "usr/bin/gamescope").isFile()
+                && stamp.isFile() && sourceStamp.equals(FileUtils.readString(stamp))) return null;
+
+        File staging = new File(context.getFilesDir(), DIR + "-plasma-mobile.new");
+        FileUtils.delete(staging);
+        FileUtils.delete(destination);
+        long sourceBytes;
+        try {
+            sourceBytes = measurePlasmaTree(context, source, source);
+        } catch (Exception e) {
+            android.util.Log.e("LinuxRuntime", "could not measure runtime for Plasma Mobile", e);
+            return "Could not read the Linux runtime files for KDE";
+        }
+        long reserve = Math.max(64L * 1024L * 1024L, sourceBytes / 20L);
+        long available = new StatFs(context.getFilesDir().getPath()).getAvailableBytes();
+        if (available < sourceBytes + reserve) {
+            return "KDE needs about " + FileUtils.sizeToString(sourceBytes + reserve)
+                    + " of free storage to make an isolated Linux runtime";
+        }
+        if (!staging.mkdirs()) return "Could not create the isolated KDE runtime directory";
+        listenerProgress(listener, "Copying an isolated Linux runtime for KDE", -1);
+        try {
+            copyPlasmaTree(context, source, staging, source);
+            FileUtils.writeString(new File(staging, ".droiddeck-source"), sourceStamp);
+            if (!staging.renameTo(destination)) {
+                FileUtils.delete(staging);
+                return "Could not finish preparing the isolated KDE runtime";
+            }
+            return null;
+        } catch (Exception e) {
+            android.util.Log.e("LinuxRuntime", "could not prepare Plasma Mobile root", e);
+            FileUtils.delete(staging);
+            return "Could not prepare the isolated KDE runtime: " + e.getMessage();
+        }
+    }
+
+    /** Measures without following links and skips app-private bind targets before opening them. */
+    private static long measurePlasmaTree(Context context, File root, File current) throws IOException {
+        String name = root.toPath().relativize(current.toPath()).toString().replace(File.separatorChar, '/');
+        if (isPlasmaExcludedDirectory(context, name)) return 0L;
+        BasicFileAttributes attrs = Files.readAttributes(current.toPath(), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (attrs.isSymbolicLink() || !attrs.isDirectory()) return attrs.size();
+        File[] children = current.listFiles();
+        if (children == null) throw new IOException("could not list " + current);
+        long bytes = 0L;
+        for (File child : children) bytes += measurePlasmaTree(context, root, child);
+        return bytes;
+    }
+
+    /** Copies without following links and checks bind targets before listing their source dirs. */
+    private static void copyPlasmaTree(Context context, File root, File destinationRoot, File current) throws IOException {
+        String name = root.toPath().relativize(current.toPath()).toString().replace(File.separatorChar, '/');
+        Path sourcePath = current.toPath();
+        Path targetPath = destinationRoot.toPath().resolve(root.toPath().relativize(sourcePath));
+        if (isPlasmaExcludedDirectory(context, name)) {
+            Files.createDirectories(targetPath);
+            return;
+        }
+        BasicFileAttributes attrs = Files.readAttributes(sourcePath, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        if (attrs.isSymbolicLink()) {
+            Files.createDirectories(targetPath.getParent());
+            Files.createSymbolicLink(targetPath, Files.readSymbolicLink(sourcePath));
+            return;
+        }
+        if (!attrs.isDirectory()) {
+            Files.createDirectories(targetPath.getParent());
+            Files.copy(sourcePath, targetPath, StandardCopyOption.COPY_ATTRIBUTES);
+            return;
+        }
+
+        Files.createDirectories(targetPath);
+        File[] children = current.listFiles();
+        if (children == null) throw new IOException("could not list " + current);
+        for (File child : children) copyPlasmaTree(context, root, destinationRoot, child);
+        try {
+            Files.setPosixFilePermissions(targetPath, Files.getPosixFilePermissions(sourcePath));
+        } catch (UnsupportedOperationException ignored) {
+            // App-private Linux rootfs storage normally supports POSIX modes; keep the copy usable
+            // on filesystems that do not expose them.
+        }
+    }
+
+    private static String plasmaSourceStamp(Context context) {
+        String version = FileUtils.readString(new File(rootDir(context), ".version"));
+        String desktop = FileUtils.readString(new File(rootDir(context), ".droiddeck-pkg-desktop"));
+        return (version == null ? "" : version.trim()) + "\n" + (desktop == null ? "" : desktop.trim());
+    }
+
+    private static boolean isPlasmaExcludedDirectory(Context context, String name) {
+        if (name.equals("dev") || name.equals("proc") || name.equals("sys") ||
+                name.equals("root") || name.equals("run") || name.equals("tmp") ||
+                name.equals("storage") || name.startsWith("storage/") ||
+                name.equals("mnt/bannerlator-sd") || name.startsWith("mnt/bannerlator-sd/") ||
+                name.equals("var/cache") || name.startsWith("var/cache/") ||
+                name.equals("var/tmp") || name.startsWith("var/tmp/")) return true;
+        // PRoot binds these host directories into the guest at their same absolute paths. Earlier
+        // sessions can leave those mount-point directories inside the source root; copying them
+        // would walk back into filesDir and recursively encounter linuxfs itself.
+        List<String> guestPaths = new ArrayList<>();
+        for (File bind : new File[]{context.getFilesDir(), context.getCacheDir()}) {
+            guestPaths.add(bind.getAbsolutePath());
+        }
+        // Android may return /data/data/<package> from Context while the guest bind target is
+        // /data/user/<id>/<package>, or vice versa. Include both spellings plus dataDir's actual
+        // files/cache locations so the runtime copy never descends into an app-private bind.
+        String dataDir = context.getApplicationInfo().dataDir;
+        if (dataDir != null) {
+            guestPaths.add(new File(dataDir, "files").getAbsolutePath());
+            guestPaths.add(new File(dataDir, "cache").getAbsolutePath());
+        }
+        String packageName = context.getPackageName();
+        int userId = Process.myUid() / 100000;
+        guestPaths.add("/data/user/" + userId + "/" + packageName + "/files");
+        guestPaths.add("/data/user/" + userId + "/" + packageName + "/cache");
+        guestPaths.add("/data/data/" + packageName + "/files");
+        guestPaths.add("/data/data/" + packageName + "/cache");
+        for (String path : guestPaths) {
+            if (!path.startsWith(File.separator)) continue;
+            String guestPath = path.substring(1).replace(File.separatorChar, '/');
+            if (name.equals(guestPath) || name.startsWith(guestPath + "/")) return true;
+        }
+        // The host path can be exposed through an alias that differs from both Context and
+        // ApplicationInfo. In the guest root, DroidDeck's bind targets are still identifiable by
+        // the package directory followed by files/ or cache/.
+        String packageMarker = "/" + context.getPackageName() + "/";
+        int packageIndex = name.indexOf(packageMarker);
+        if (packageIndex >= 0) {
+            String bindTarget = name.substring(packageIndex + packageMarker.length());
+            if (bindTarget.equals("files") || bindTarget.startsWith("files/") ||
+                    bindTarget.equals("cache") || bindTarget.startsWith("cache/")) return true;
+        }
+        return false;
+    }
+
+    private static void listenerProgress(LinuxRuntimeInstaller.ProgressListener listener, String stage, int percent) {
+        if (listener != null) listener.onProgress(stage, percent);
+    }
+
+    /** Whether the copy still matches the installed runtime and desktop package. */
+    public static boolean isPlasmaRootCurrent(Context context) {
+        File stamp = new File(plasmaRootDir(context), ".droiddeck-source");
+        return stamp.isFile() && plasmaSourceStamp(context).equals(FileUtils.readString(stamp));
+    }
+
     /**
      * The session's own small tree beside the rootfs: the fake evdev nodes and their rings. In
      * Bannerlator these lived in the Wine imagefs; here there is no Wine, so the session owns them.
@@ -55,6 +222,11 @@ public final class LinuxRuntime {
      */
     public static File sessionRoot(Context context) {
         return new File(context.getFilesDir(), "session");
+    }
+
+    /** Per-session input and PTY files for the compositor hosted on an external display. */
+    public static File sessionRoot(Context context, boolean externalDisplay) {
+        return new File(context.getFilesDir(), externalDisplay ? "session-external-display" : "session");
     }
 
     /** Where the runtime carries the host-side proot; see tools/linuxfs/prebuilt/proot/README.md. */
@@ -89,7 +261,11 @@ public final class LinuxRuntime {
 
     /** The Vulkan ICD manifest the rootfs ships for the device GPU, or null when it has none. */
     public static File vulkanIcd(Context context) {
-        File icdDir = new File(rootDir(context), "usr/share/vulkan/icd.d");
+        return vulkanIcd(rootDir(context));
+    }
+
+    public static File vulkanIcd(File root) {
+        File icdDir = new File(root, "usr/share/vulkan/icd.d");
         File[] manifests = icdDir.listFiles((dir, name) -> name.endsWith(".json"));
         if (manifests == null) return null;
         for (File manifest : manifests) {
@@ -114,7 +290,19 @@ public final class LinuxRuntime {
     public static List<String> command(Context context, File sessionRoot, File runtimeDir,
                                        File externalStorage, List<String> extraBinds,
                                        List<String> guestCommand) {
-        File root = rootDir(context);
+        return commandForRoot(context, rootDir(context), sessionRoot, runtimeDir, externalStorage, extraBinds, guestCommand);
+    }
+
+    public static List<String> commandForRoot(Context context, File root, File sessionRoot, File runtimeDir,
+                                              File externalStorage, List<String> extraBinds,
+                                              List<String> guestCommand) {
+        return commandForRoot(context, root, sessionRoot, runtimeDir, externalStorage, extraBinds, guestCommand, false);
+    }
+
+    /** As above, optionally giving package installers PRoot's fake-root identity inside the guest. */
+    public static List<String> commandForRoot(Context context, File root, File sessionRoot, File runtimeDir,
+                                              File externalStorage, List<String> extraBinds,
+                                              List<String> guestCommand, boolean fakeRoot) {
         List<String> cmd = new ArrayList<>();
         cmd.add(prootBinary(context).getPath());
         cmd.add("--kill-on-exit");
@@ -124,9 +312,13 @@ public final class LinuxRuntime {
         // setgid()/setuid() before it execs xkbcomp and _exit(127)s when they fail, so without
         // this the keymap never compiles and Xwayland dies. -i makes proot answer those calls
         // itself while still reporting our real ids, so nothing inside sees a different user.
-        int uid = Process.myUid();
-        cmd.add("-i");
-        cmd.add(uid + ":" + uid);
+        if (fakeRoot) {
+            cmd.add("-0");
+        } else {
+            int uid = Process.myUid();
+            cmd.add("-i");
+            cmd.add(uid + ":" + uid);
+        }
         cmd.add("-r");
         cmd.add(root.getPath());
         cmd.add("-w");
@@ -258,7 +450,10 @@ public final class LinuxRuntime {
 
     /** X access control and Steam look the session user up by uid: the app uid is root inside. */
     public static void writeAccounts(Context context) throws IOException {
-        File root = rootDir(context);
+        writeAccounts(context, rootDir(context));
+    }
+
+    public static void writeAccounts(Context context, File root) throws IOException {
         int uid = Process.myUid();
         Files.write(new File(root, "etc/passwd").toPath(),
                 ("root:x:" + uid + ":" + uid + ":root:/root:/bin/bash\n").getBytes(StandardCharsets.UTF_8));

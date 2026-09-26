@@ -8,6 +8,7 @@ enum class SecondScreenMode(val id: String, val label: String) {
     NONE("none", "None"),
     KEYBOARD_TRACKPAD("keyboard-trackpad", "Keyboard + trackpad"),
     TERMINAL("terminal", "Terminal"),
+    PLASMA_MOBILE("plasma-mobile", "KDE Plasma Mobile"),
 }
 
 data class SecondScreenDisplay(val id: Int, val label: String)

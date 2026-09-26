@@ -59,6 +59,8 @@ class ModeSettings(
     val clientDirectAudio: Boolean = false,
     val mic: Boolean?,
     val renderer: String?,
+    val desktopEnvironment: String? = null,
+    val plasmaMobileInstalled: Boolean = false,
     val gameStorage: String? = null,
     val storageOptions: List<Pair<String, String>> = emptyList(),
     val fexPreset: String? = null,
@@ -114,6 +116,7 @@ class ModeSettingsActions(
     val onClientDirectAudio: (Boolean) -> Unit = {},
     val onMic: (Boolean) -> Unit,
     val onRenderer: (String) -> Unit,
+    val onDesktopEnvironment: (String) -> Unit = {},
     val onGameStorage: (path: String, label: String) -> Unit = { _, _ -> },
     val onPickGameStorageFolder: () -> Unit = {},
     val onFexPreset: (String) -> Unit = {},
@@ -219,6 +222,19 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                     ?: "Restart the app to apply.",
                 checked = s.hdr && s.hdrReason == null, enabled = s.hdrReason == null, onChange = a.onHdr,
             )
+        }
+        if (s.desktopEnvironment != null) SettingsGroup("Desktop environment") {
+            ChoiceRow(
+                host, "desktop-environment", "Desktop", null,
+                SessionPrefs.desktopEnvironmentChoices, s.desktopEnvironment,
+                note = "KDE Plasma Mobile installs on first launch and can also run on a second screen.",
+                onPick = a.onDesktopEnvironment,
+            )
+            SettingsRow(
+                "KDE Plasma Mobile",
+                if (s.plasmaMobileInstalled) "Installed and ready."
+                else "Downloads packages from Arch Linux ARM the first time you open Desktop.",
+            ) { }
         }
         SettingsGroup("Drivers") {
             SettingsRow("Runtime driver", (if (steam) "Used by Steam and games." else "Used by desktop apps.") + " Applies next session.") {

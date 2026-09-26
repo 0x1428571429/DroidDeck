@@ -8,6 +8,7 @@ import com.droiddeck.launcher.core.FileUtils;
 import com.droiddeck.launcher.core.SessionPart;
 import com.droiddeck.launcher.core.HostProcess;
 import com.droiddeck.launcher.core.TarZst;
+import com.droiddeck.launcher.session.SessionProcess;
 
 import java.io.File;
 import java.io.InputStream;
@@ -50,7 +51,8 @@ public class PulseAudioComponent extends SessionPart {
 
     /** As above, with a microphone fed from {@code micFifoPath}; null for output only. */
     public PulseAudioComponent(Context context, String micFifoPath) {
-        this.workingDir = new File(context.getFilesDir(), "pulseaudio");
+        this.workingDir = new File(context.getFilesDir(),
+                SessionProcess.INSTANCE.isExternalDisplay(context) ? "pulseaudio-external-display" : "pulseaudio");
         this.micFifoPath = micFifoPath;
     }
 

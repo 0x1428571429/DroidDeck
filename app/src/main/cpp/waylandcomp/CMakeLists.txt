@@ -22,6 +22,7 @@ add_library(bannerwayland SHARED
         generated/xdg-shell-protocol.c
         generated/linux-dmabuf-v1-protocol.c
         generated/viewporter-protocol.c
+        generated/single-pixel-buffer-v1-protocol.c
         generated/banner-desktop-v1-protocol.c
         generated/presentation-time-protocol.c
         generated/pointer-constraints-unstable-v1-protocol.c

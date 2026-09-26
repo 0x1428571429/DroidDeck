@@ -41,6 +41,7 @@
 #include "sc_layer.h"
 #include "ahb_swapchain.h"
 #include "viewporter-server-protocol.h"
+#include "single-pixel-buffer-v1-server-protocol.h"
 #include "banner-desktop-v1-server-protocol.h"
 #include "presentation-time-server-protocol.h"
 #include "pointer-constraints-unstable-v1-server-protocol.h"
@@ -749,6 +750,23 @@ static void take_shm(struct surface *s, struct wl_shm_buffer *shm, struct wl_res
     if (ci && ci->asked_feedback) ci->shm_frames++;  /* since it asked for GPU buffers */
 }
 
+static int get_single_pixel_buffer(struct wl_resource *buffer, uint32_t *pixel);
+
+/* Copy a wp_single_pixel_buffer into the surface's image and release the resource. */
+static void take_single_pixel(struct surface *s, uint32_t pixel,
+                              struct wl_resource *resource) {
+    if (s->shm_img && (vkp_image_width(s->shm_img) != 1 || vkp_image_height(s->shm_img) != 1)) {
+        vkp_image_destroy(s->shm_img);
+        s->shm_img = NULL;
+    }
+    if (!s->shm_img) s->shm_img = vkp_image_create_shm(1, 1);
+    if (s->shm_img) vkp_image_upload_shm(s->shm_img, &pixel, 4);
+    wl_buffer_send_release(resource);
+    s->buf_w = 1;
+    s->buf_h = 1;
+    s->has_content = s->shm_img != NULL;
+}
+
 /* The window the app's performance HUD follows: the latest one at least as big as the last to
  * start presenting GPU frames (take_dmabuf) (X11 binds the HUD to the _MESA_DRV window and counts X presents instead). JNI upcalls. */
 static struct surface *g_hud_surface;
@@ -999,6 +1017,8 @@ static void surface_commit(struct wl_client *c, struct wl_resource *r) {
     if (s->pending_attach) {
         struct wl_resource *buffer = s->pending_buffer;
         struct dmabuf_buffer *db = get_dmabuf(buffer);
+        uint32_t pixel = 0;
+        int has_single_pixel = get_single_pixel_buffer(buffer, &pixel);
         struct wl_shm_buffer *shm = buffer && !db ? wl_shm_buffer_get(buffer) : NULL;
 
         /* The previous content is replaced before reaching the screen. */
@@ -1018,6 +1038,8 @@ static void surface_commit(struct wl_client *c, struct wl_resource *r) {
                 cursor_publish_hidden();  /* wlroots clears its cursor surface to hide the pointer */
             } else if (shm) {
                 cursor_publish_shm(shm, g_cursor_hx, g_cursor_hy);
+            } else if (has_single_pixel) {
+                cursor_publish_pixels((const uint8_t *)&pixel, 1, 1, 4, g_cursor_hx, g_cursor_hy);
             } else if (db && db->n_planes >= 1 && db->width * db->height <= CURSOR_MAX_PX) {
                 if (!db->img && !db->import_failed) {
                     db->img = vkp_image_from_dmabuf(db->fd[0], db->format, db->modifier, db->width, db->height,
@@ -1037,6 +1059,9 @@ static void surface_commit(struct wl_client *c, struct wl_resource *r) {
         } else if (shm) {
             drop_dmabuf(s, 1);
             take_shm(s, shm, buffer);
+        } else if (has_single_pixel) {
+            drop_dmabuf(s, 1);
+            take_single_pixel(s, pixel, buffer);
         } else {
             drop_dmabuf(s, 1);
             s->has_content = 0;
@@ -1330,6 +1355,80 @@ static const struct wp_viewporter_interface viewporter_impl = {
 static void bind_viewporter(struct wl_client *c, void *data, uint32_t ver, uint32_t id) {
     struct wl_resource *r = wl_resource_create(c, &wp_viewporter_interface, ver, id);
     wl_resource_set_implementation(r, &viewporter_impl, NULL, NULL);
+}
+
+/* ---------------------------------------------------------------- wp_single_pixel_buffer_manager_v1
+ * KWin's nested Wayland backend uses one-pixel buffers for its output background. */
+
+struct single_pixel_buffer {
+    uint32_t pixel;
+};
+
+static void single_pixel_buffer_destroy_req(struct wl_client *c, struct wl_resource *r) {
+    wl_resource_destroy(r);
+}
+
+static const struct wl_buffer_interface single_pixel_buffer_impl = {
+    .destroy = single_pixel_buffer_destroy_req,
+};
+
+static int get_single_pixel_buffer(struct wl_resource *buffer, uint32_t *pixel) {
+    if (!buffer || !wl_resource_instance_of(buffer, &wl_buffer_interface, &single_pixel_buffer_impl))
+        return 0;
+    struct single_pixel_buffer *single = wl_resource_get_user_data(buffer);
+    if (!single) return 0;
+    *pixel = single->pixel;
+    return 1;
+}
+
+static void single_pixel_buffer_resource_destroy(struct wl_resource *r) {
+    free(wl_resource_get_user_data(r));
+}
+
+static void single_pixel_manager_destroy(struct wl_client *c, struct wl_resource *r) {
+    wl_resource_destroy(r);
+}
+
+static uint32_t single_pixel_channel(uint32_t value) {
+    return (uint32_t)(((uint64_t)value * 255u + UINT32_MAX / 2u) / UINT32_MAX);
+}
+
+static void single_pixel_create_buffer(struct wl_client *c, struct wl_resource *r, uint32_t id,
+                                       uint32_t red, uint32_t green, uint32_t blue, uint32_t alpha) {
+    struct single_pixel_buffer *buffer = calloc(1, sizeof(*buffer));
+    if (!buffer) {
+        wl_client_post_no_memory(c);
+        return;
+    }
+
+    /* wl_shm's ARGB8888 word layout is 0xAARRGGBB. */
+    buffer->pixel = (single_pixel_channel(alpha) << 24)
+            | (single_pixel_channel(red) << 16)
+            | (single_pixel_channel(green) << 8)
+            | single_pixel_channel(blue);
+
+    struct wl_resource *resource = wl_resource_create(c, &wl_buffer_interface, 1, id);
+    if (!resource) {
+        free(buffer);
+        wl_client_post_no_memory(c);
+        return;
+    }
+    wl_resource_set_implementation(resource, &single_pixel_buffer_impl, buffer,
+                                   single_pixel_buffer_resource_destroy);
+}
+
+static const struct wp_single_pixel_buffer_manager_v1_interface single_pixel_manager_impl = {
+    .destroy = single_pixel_manager_destroy,
+    .create_u32_rgba_buffer = single_pixel_create_buffer,
+};
+
+static void bind_single_pixel_manager(struct wl_client *c, void *data, uint32_t ver, uint32_t id) {
+    struct wl_resource *r = wl_resource_create(c, &wp_single_pixel_buffer_manager_v1_interface, ver, id);
+    if (!r) {
+        wl_client_post_no_memory(c);
+        return;
+    }
+    wl_resource_set_implementation(r, &single_pixel_manager_impl, NULL, NULL);
 }
 
 /* ------------------------------------------------------------------ xdg_shell */
@@ -3641,6 +3740,7 @@ int banner_wayland_run(void) {
     wl_global_create(display, &wl_compositor_interface, 6, NULL, bind_compositor);
     wl_global_create(display, &wl_subcompositor_interface, 1, NULL, bind_subcompositor);
     wl_global_create(display, &wp_viewporter_interface, 1, NULL, bind_viewporter);
+    wl_global_create(display, &wp_single_pixel_buffer_manager_v1_interface, 1, NULL, bind_single_pixel_manager);
     wl_display_init_shm(display); /* wl_shm global + pool/buffer handling */
     /* libdecor binds wl_output at 4; a lower version is a protocol error for the client. */
     wl_global_create(display, &wl_output_interface, 4, NULL, bind_output);

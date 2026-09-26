@@ -108,8 +108,17 @@ if [ -z "${BL_INSIDE:-}" ]; then
     wayland-info >/dev/null 2>&1 && break
     sleep 0.1
   done
-  # The desktop (DroidDeck's hosted package) is its own nested compositor, labwc, drawing straight
-  # into the app's: no gamescope in between.
+  # LXQt uses its nested compositor; Plasma Mobile starts a nested KWin session. The selected
+  # primary desktop comes through BL_DESKTOP_ENV, while the independent secondary-display process
+  # starts directly in plasma-mobile mode.
+  if [ "$mode" = lxqt ] && [ "${BL_DESKTOP_ENV:-lxqt}" = plasma-mobile ]; then
+    mode=plasma-mobile
+  fi
+  if [ "$mode" = plasma-mobile ]; then
+    step "starting KDE Plasma Mobile"
+    [ -x /usr/local/bin/droiddeck-plasma-mobile ] || { echo "== Plasma Mobile launcher is missing"; exit 66; }
+    exec /usr/local/bin/droiddeck-plasma-mobile
+  fi
   if [ "$mode" = lxqt ]; then
     step "starting the desktop"
     [ -x /usr/local/bin/droiddeck-desktop ] || { echo "== the desktop package is not installed"; exit 66; }

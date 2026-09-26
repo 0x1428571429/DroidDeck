@@ -113,6 +113,7 @@ class SecondScreenPresentation(
             SecondScreenMode.KEYBOARD_TRACKPAD -> renderKeyboardAndTrackpad()
             SecondScreenMode.TERMINAL -> renderTerminal()
             SecondScreenMode.NONE -> Unit
+            SecondScreenMode.PLASMA_MOBILE -> Unit
         }
     }
 

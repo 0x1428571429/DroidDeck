@@ -62,6 +62,19 @@ object DesktopCatalog {
     fun desktopInstalled(context: Context): Boolean =
         File(LinuxRuntime.rootDir(context), "usr/bin/labwc").isFile
 
+    /** Plasma Mobile lives in a copied Arch root so its package updates never touch Steam's root. */
+    fun plasmaMobileInstalled(context: Context): Boolean {
+        val root = LinuxRuntime.plasmaRootDir(context)
+        return LinuxRuntime.isPlasmaRootCurrent(context) &&
+            plasmaMobileMarker(context).isFile &&
+            File(root, "usr/bin/kwin_wayland").isFile &&
+            File(root, "usr/bin/plasmashell").isFile &&
+            File(root, "usr/share/plasma/shells/org.kde.plasma.mobileshell").isDirectory
+    }
+
+    internal fun plasmaMobileMarker(context: Context): File =
+        File(context.filesDir, ".droiddeck-plasma-mobile-installed")
+
     /** Downloads, verifies and installs one package. Returns null on success, else a message. */
     fun install(context: Context, entry: Entry, listener: LinuxRuntimeInstaller.ProgressListener?): String? {
         val root = LinuxRuntime.rootDir(context)

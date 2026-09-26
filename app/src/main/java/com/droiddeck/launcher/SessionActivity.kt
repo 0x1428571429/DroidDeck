@@ -54,6 +54,7 @@ import com.droiddeck.launcher.session.SessionArtifacts
 import com.droiddeck.launcher.session.SessionLogShare
 import com.droiddeck.launcher.session.SessionPhase
 import com.droiddeck.launcher.session.SessionPaths
+import com.droiddeck.launcher.session.SessionProcess
 import com.droiddeck.launcher.wayland.HdrSupport
 import com.droiddeck.launcher.session.SessionService
 import com.droiddeck.launcher.session.SessionState
@@ -82,7 +83,7 @@ import kotlin.math.abs
  * since it is input rather than a menu), and one Compose layer on top for everything else -
  * the HUD line, the loading overlay, the drawer and its dialogs.
  */
-class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
+open class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
     private lateinit var surfaceView: SurfaceView
     private lateinit var sessionOverlay: ComposeView
     private lateinit var loading: LoadingState
@@ -210,7 +211,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         surfaceView.holder.addCallback(this)
         root.addView(surfaceView)
 
-        val bridge = PadBridge(File(LinuxRuntime.sessionRoot(this), "dev/input"))
+        val bridge = PadBridge(File(LinuxRuntime.sessionRoot(this, SessionProcess.isExternalDisplay(this)), "dev/input"))
         padBridge = bridge
         // A player on the pad or the on-screen controls has no use for the mouse arrow; the next
         // touchpad or mouse move brings it back (showCursor), once the pad has been quiet a moment.
@@ -230,10 +231,21 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
 
         loading = LoadingState(this)
         if (!SessionState.running) {
+            val requestedMode = intent.getStringExtra(SessionService.EXTRA_MODE) ?: SessionService.MODE_STEAM
             val needRuntime = com.droiddeck.launcher.runtime.LinuxRuntimeInstaller.installedVersion(this) == null
-            val needDesktop = intent.getStringExtra(SessionService.EXTRA_MODE) == SessionService.MODE_DESKTOP &&
+            val desktopMode = requestedMode == SessionService.MODE_DESKTOP || requestedMode == SessionService.MODE_PLASMA_MOBILE
+            val needDesktop = desktopMode &&
                 !com.droiddeck.launcher.runtime.DesktopCatalog.desktopInstalled(this)
-            if (needRuntime || needDesktop) installThenStart(needRuntime, needDesktop)
+            val wantsPlasma = requestedMode == SessionService.MODE_PLASMA_MOBILE ||
+                (requestedMode == SessionService.MODE_DESKTOP &&
+                    SessionPrefs.desktopEnvironment(this) == SessionPrefs.DESKTOP_ENV_PLASMA_MOBILE)
+            val plasmaInstalled = com.droiddeck.launcher.runtime.DesktopCatalog.plasmaMobileInstalled(this)
+            val needPlasma = wantsPlasma && !plasmaInstalled && requestedMode == SessionService.MODE_DESKTOP
+            if (requestedMode == SessionService.MODE_PLASMA_MOBILE && (!plasmaInstalled || needDesktop || needRuntime)) {
+                loading.showEnded("Open Desktop with KDE Plasma Mobile once before selecting it for the second screen.")
+            } else if (needRuntime || needDesktop || needPlasma) {
+                installThenStart(needRuntime, needDesktop, needPlasma)
+            }
         }
         hud = PerfHud(this)
         hud.onPresentingWindowChanged = {
@@ -291,6 +303,8 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                         secondScreenMode = secondScreenMode,
                         secondScreenDisplays = secondScreenDisplays,
                         selectedSecondScreenDisplay = selectedSecondScreenDisplay,
+                        plasmaMobileInstalled = com.droiddeck.launcher.runtime.DesktopCatalog.desktopInstalled(this@SessionActivity) &&
+                            com.droiddeck.launcher.runtime.DesktopCatalog.plasmaMobileInstalled(this@SessionActivity),
                         onHud = { on -> SessionPrefs.setHudEnabled(this@SessionActivity, on); hudOn = on; hud.refresh() },
                         onFillScreen = { on -> SessionPrefs.setForceFullscreen(this@SessionActivity, on); fillScreen = on },
                         onFrameGenPick = { engine, multiplier ->
@@ -472,16 +486,28 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
      * are downloaded and unpacked here, on the loading screen's own line and bar, and the session
      * starts when they are in. Nothing else changes.
      */
-    private fun installThenStart(runtime: Boolean, desktop: Boolean) {
+    private fun installThenStart(runtime: Boolean, desktop: Boolean, plasmaMobile: Boolean) {
         if (SessionState.stopRequested) return
         installingRuntime = true
-        SessionState.installing = if (runtime) "runtime" else "desktop"
+        SessionState.installing = when {
+            runtime -> "runtime"
+            desktop -> "desktop"
+            else -> "plasma-mobile"
+        }
         SessionEvents.transition(
             SessionPhase.INSTALLING_RUNTIME,
-            if (runtime) "runtime.installing" else "desktop.installing",
+            when (SessionState.installing) {
+                "runtime" -> "runtime.installing"
+                "desktop" -> "desktop.installing"
+                else -> "plasma-mobile.installing"
+            },
             mapOf("component" to SessionState.installing),
         )
-        loading.step = if (runtime) "downloading the Linux runtime" else "downloading the desktop"
+        loading.step = when (SessionState.installing) {
+            "runtime" -> "downloading the Linux runtime"
+            "desktop" -> "downloading the desktop"
+            else -> "installing KDE Plasma Mobile"
+        }
         loading.percent = -1
         Thread({
             var failedComponent: String? = null
@@ -496,6 +522,12 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                 problem = installDesktop()
                 if (problem == null) SessionEvents.record("desktop.ready") else failedComponent = "desktop"
             }
+            if (problem == null && plasmaMobile && !SessionState.stopRequested) {
+                SessionState.installing = "plasma-mobile"
+                SessionEvents.transition(SessionPhase.INSTALLING_RUNTIME, "plasma-mobile.installing", mapOf("component" to "plasma-mobile"))
+                problem = installPlasmaMobile()
+                if (problem == null) SessionEvents.record("plasma-mobile.ready") else failedComponent = "plasma-mobile"
+            }
             uiHandler.post {
                 installingRuntime = false
                 SessionState.installing = null
@@ -507,7 +539,11 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                     return@post
                 }
                 if (problem != null) {
-                    val code = if (failedComponent == "runtime") "RUNTIME_INSTALL_FAILED" else "DESKTOP_INSTALL_FAILED"
+                    val code = when (failedComponent) {
+                        "runtime" -> "RUNTIME_INSTALL_FAILED"
+                        "plasma-mobile" -> "PLASMA_MOBILE_INSTALL_FAILED"
+                        else -> "DESKTOP_INSTALL_FAILED"
+                    }
                     SessionEvents.fail(code, problem)
                     collectStartArtifacts("session start failed")
                     loading.showEnded(problem)
@@ -561,12 +597,25 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         return problem?.let { "The desktop did not install ($it). Check the connection and press Desktop again." }
     }
 
+    private fun installPlasmaMobile(): String? {
+        uiHandler.post { loading.percent = -1; loading.step = "installing KDE Plasma Mobile packages" }
+        val problem = com.droiddeck.launcher.runtime.PlasmaMobileInstaller.install(
+            this,
+            com.droiddeck.launcher.runtime.LinuxRuntimeInstaller.ProgressListener { stage, percent ->
+                uiHandler.post { loading.percent = percent; loading.step = stage }
+            },
+        )
+        return problem?.let { "KDE Plasma Mobile did not install: $it. Press Desktop again to retry." }
+    }
+
     override fun surfaceCreated(holder: SurfaceHolder) {
         if (installingRuntime || SessionState.stopRequested) return
         if (!SessionState.running) {
+            SessionState.mode = intent.getStringExtra(SessionService.EXTRA_MODE) ?: SessionService.MODE_STEAM
             SessionEvents.transition(SessionPhase.STARTING_COMPOSITOR, "compositor.starting")
         }
-        val runtimeDir = File(filesDir, ".wayland-rt").apply { mkdirs() }
+        val externalDisplay = SessionProcess.isExternalDisplay(this)
+        val runtimeDir = File(filesDir, if (externalDisplay) ".wayland-rt-external-display" else ".wayland-rt").apply { mkdirs() }
         // The compositor hands this keymap to wl_keyboard clients, which is how the guest reads
         // the evdev codes we inject.
         FileUtils.copyAsset(this, "wayland/keymap.xkb", File(runtimeDir, "keymap.xkb"))
@@ -762,7 +811,7 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
     }
 
     private fun onSessionEnded(status: Int) {
-        closeSecondScreen(reset = true)
+        closeSecondScreen(reset = true, stopPlasma = true)
         if (status == 0) {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -1107,26 +1156,30 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         secondScreenDisplays = candidates
         val newIds = candidates.map { it.id }.toSet()
         if (secondScreenMode != SecondScreenMode.NONE && oldIds.isNotEmpty() && selectedSecondScreenDisplay !in newIds) {
-            closeSecondScreen(reset = true)
+            closeSecondScreen(reset = true, stopPlasma = true)
             return
         }
         if (selectedSecondScreenDisplay !in newIds) selectedSecondScreenDisplay = candidates.firstOrNull()?.id ?: -1
-        if (secondScreenMode != SecondScreenMode.NONE && candidates.isEmpty()) closeSecondScreen(reset = true)
+        if (secondScreenMode != SecondScreenMode.NONE && candidates.isEmpty()) closeSecondScreen(reset = true, stopPlasma = true)
     }
 
     private fun selectSecondScreenDisplay(displayId: Int) {
         if (secondScreenDisplays.none { it.id == displayId }) return
+        val movePlasma = secondScreenMode == SecondScreenMode.PLASMA_MOBILE && selectedSecondScreenDisplay != displayId
+        if (movePlasma) closeSecondScreen(reset = true, stopPlasma = true)
         selectedSecondScreenDisplay = displayId
-        if (secondScreenMode != SecondScreenMode.NONE) showSecondScreen(secondScreenMode)
+        if (movePlasma) {
+            uiHandler.postDelayed({ if (displayId in secondScreenDisplays.map { it.id }) showSecondScreen(SecondScreenMode.PLASMA_MOBILE) }, 700)
+        } else if (secondScreenMode != SecondScreenMode.NONE) showSecondScreen(secondScreenMode)
     }
 
     private fun selectSecondScreenMode(mode: SecondScreenMode) {
         if (mode == SecondScreenMode.NONE) {
-            closeSecondScreen(reset = true)
+            closeSecondScreen(reset = true, stopPlasma = true)
             return
         }
         if (secondScreenDisplays.isEmpty()) {
-            secondScreenMode = SecondScreenMode.NONE
+            closeSecondScreen(reset = true, stopPlasma = true)
             return
         }
         if (selectedSecondScreenDisplay !in secondScreenDisplays.map { it.id }) {
@@ -1138,9 +1191,38 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
     private fun showSecondScreen(mode: SecondScreenMode) {
         val target = displayManager.getDisplay(selectedSecondScreenDisplay)
         if (target == null || !target.isValid || (target.flags and Display.FLAG_PRESENTATION) == 0) {
-            closeSecondScreen(reset = true)
+            closeSecondScreen(reset = true, stopPlasma = true)
             refreshSecondScreenDisplays()
             return
+        }
+        if (mode == SecondScreenMode.PLASMA_MOBILE) {
+            if (!com.droiddeck.launcher.runtime.DesktopCatalog.desktopInstalled(this) ||
+                !com.droiddeck.launcher.runtime.DesktopCatalog.plasmaMobileInstalled(this)) {
+                secondScreenMode = SecondScreenMode.NONE
+                Toast.makeText(this, "Open Desktop with KDE Plasma Mobile once to install it.", Toast.LENGTH_LONG).show()
+                return
+            }
+            secondScreenPresentation?.closeControls()
+            secondScreenPresentation = null
+            try {
+                val launch = Intent(this, ExternalSessionActivity::class.java)
+                    .putExtra(SessionService.EXTRA_MODE, SessionService.MODE_PLASMA_MOBILE)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                val options = android.app.ActivityOptions.makeBasic()
+                    .setLaunchDisplayId(target.displayId)
+                    .toBundle()
+                startActivity(launch, options)
+                secondScreenMode = mode
+            } catch (e: Exception) {
+                Log.w(TAG, "could not open Plasma Mobile on ${target.name}", e)
+                Toast.makeText(this, "Could not open KDE Plasma Mobile on ${target.name}.", Toast.LENGTH_LONG).show()
+                secondScreenMode = SecondScreenMode.NONE
+            }
+            return
+        }
+        if (secondScreenMode == SecondScreenMode.PLASMA_MOBILE) {
+            SessionService.stopExternalDisplaySession(this)
+            secondScreenMode = SecondScreenMode.NONE
         }
         var presentation = secondScreenPresentation
         if (presentation?.display?.displayId != target.displayId) {
@@ -1187,7 +1269,10 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         }
     }
 
-    private fun closeSecondScreen(reset: Boolean) {
+    private fun closeSecondScreen(reset: Boolean, stopPlasma: Boolean = false) {
+        if (stopPlasma && secondScreenMode == SecondScreenMode.PLASMA_MOBILE) {
+            SessionService.stopExternalDisplaySession(this)
+        }
         secondScreenPresentation?.closeControls()
         secondScreenPresentation = null
         if (reset) secondScreenMode = SecondScreenMode.NONE
@@ -1287,7 +1372,8 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
             // Auto: the touch pad when there is no controller - except on the desktop, where the
             // screen is a touchpad for the pointer and a pad over it would be in the way. A game
             // started from the rail, or Steam, gets it; the drawer turns it on anywhere.
-            else -> !PadBridge.anyControllerConnected() && SessionState.mode != SessionService.MODE_DESKTOP
+            else -> !PadBridge.anyControllerConnected() &&
+                SessionState.mode != SessionService.MODE_DESKTOP && SessionState.mode != SessionService.MODE_PLASMA_MOBILE
         }
         if (show == (controls.visibility == View.VISIBLE)) return
         if (!show) controls.releaseAll()
@@ -1305,13 +1391,17 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         super.onStart()
         displayManager.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
         refreshSecondScreenDisplays()
-        if (secondScreenMode != SecondScreenMode.NONE) showSecondScreen(secondScreenMode)
+        // The external activity owns Plasma Mobile on the second display. Reopening it whenever
+        // this activity returns caused a failed guest to relaunch in a loop.
+        if (secondScreenMode != SecondScreenMode.NONE && secondScreenMode != SecondScreenMode.PLASMA_MOBILE) {
+            showSecondScreen(secondScreenMode)
+        }
         SessionService.setActivityVisible(this, true)
     }
 
     override fun onStop() {
         displayManager.unregisterDisplayListener(displayListener)
-        closeSecondScreen(reset = true)
+        if (secondScreenMode != SecondScreenMode.PLASMA_MOBILE) closeSecondScreen(reset = true)
         SessionService.setActivityVisible(this, false)
         super.onStop()
     }

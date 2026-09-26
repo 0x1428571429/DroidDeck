@@ -59,6 +59,7 @@ object SessionFiles {
         // staging them into a runtime without it would make the desktop look present when it is not.
         val desktop = arrayOf(
             "usr/local/bin/droiddeck-desktop" to "usr/local/bin/droiddeck-desktop",
+            "usr/local/bin/droiddeck-plasma-mobile" to "usr/local/bin/droiddeck-plasma-mobile",
             // Games and emulators from the menu, full screen in a gamescope of their own.
             "usr/local/bin/droiddeck-gpu" to "usr/local/bin/droiddeck-gpu",
             "usr/local/bin/droiddeck-desktop-gpu" to "usr/local/bin/droiddeck-desktop-gpu",

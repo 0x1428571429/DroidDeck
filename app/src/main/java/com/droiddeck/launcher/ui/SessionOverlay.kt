@@ -216,6 +216,7 @@ class DrawerActions(
     val secondScreenMode: SecondScreenMode,
     val secondScreenDisplays: List<SecondScreenDisplay>,
     val selectedSecondScreenDisplay: Int,
+    val plasmaMobileInstalled: Boolean = false,
     val onHud: (Boolean) -> Unit,
     val onFrameGenPick: (engine: String, multiplier: Int) -> Unit,
     /** The Android keyboard (text, turned into key presses). */
@@ -457,8 +458,10 @@ fun SessionDrawer(open: Boolean, page: Int, controllerActive: Boolean, onPageCha
                                 }
                             }
                             if (a.steam && a.secondScreenDisplays.isNotEmpty()) SettingsGroup("Second screen") {
-                                ChoiceRow(host, "second-screen-mode", "Controls", null,
-                                    listOf(SecondScreenMode.NONE, SecondScreenMode.KEYBOARD_TRACKPAD, SecondScreenMode.TERMINAL).map { it to it.label },
+                                val secondScreenModes = listOf(SecondScreenMode.NONE, SecondScreenMode.KEYBOARD_TRACKPAD, SecondScreenMode.TERMINAL) +
+                                    if (a.plasmaMobileInstalled) listOf(SecondScreenMode.PLASMA_MOBILE) else emptyList()
+                                ChoiceRow(host, "second-screen-mode", "Mode", null,
+                                    secondScreenModes.map { it to it.label },
                                     a.secondScreenMode, chipModifier = focus.track(page, "second-screen-mode"), onPick = a.onSecondScreenMode)
                                 if (a.secondScreenDisplays.size > 1) ChoiceRow(host, "second-screen-display", "Display", null,
                                     a.secondScreenDisplays.map { it.id to it.label }, a.selectedSecondScreenDisplay,

@@ -115,6 +115,19 @@
             android:resizeableActivity="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density" />
 
+        <!-- A second compositor and Linux session need their own process-global JNI state and
+             runtime sockets, while the handheld's current session remains in the main process. -->
+        <activity
+            android:name=".ExternalSessionActivity"
+            android:process=":externalDisplay"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@style/SessionTheme"
+            android:preferMinimalPostProcessing="true"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density" />
+
         <!--
             Owns the session - gamescope, the Steam client, audio - so it survives the activity
             going away. Without it Android demotes the process as soon as the last visible
@@ -123,6 +136,11 @@
         -->
         <service
             android:name=".session.SessionService"
+            android:exported="false"
+            android:stopWithTask="false" />
+        <service
+            android:name=".session.ExternalSessionService"
+            android:process=":externalDisplay"
             android:exported="false"
             android:stopWithTask="false" />
         <!-- Hands a zipped session folder to the share sheet; nothing else is exposed. -->

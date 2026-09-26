@@ -23,6 +23,7 @@ import android.os.PowerManager
 import android.util.Log
 import com.droiddeck.launcher.R
 import com.droiddeck.launcher.SessionActivity
+import com.droiddeck.launcher.ExternalSessionActivity
 import com.droiddeck.launcher.audio.DirectAudioRelayComponent
 import com.droiddeck.launcher.audio.PulseAudioComponent
 import com.droiddeck.launcher.core.CpuCores
@@ -55,7 +56,7 @@ import java.util.Locale
  *
  * The activity comes and goes on top of this; see [com.droiddeck.launcher.wayland.CompositorHost].
  */
-class SessionService : Service() {
+open class SessionService : Service() {
     private val components = java.util.concurrent.CopyOnWriteArrayList<SessionPart>()
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -160,14 +161,14 @@ class SessionService : Service() {
                 return START_NOT_STICKY
             }
         }
-        startForeground(NOTIFICATION_ID, buildNotification())
+        if (!SessionState.running) SessionState.mode = intent?.getStringExtra(EXTRA_MODE) ?: MODE_STEAM
+        startForeground(notificationId(), buildNotification())
         if (SessionState.running) return START_NOT_STICKY
         if (SessionState.stopRequested) {
             SessionState.running = true
             stopSession(0)
             return START_NOT_STICKY
         }
-        SessionState.mode = intent?.getStringExtra(EXTRA_MODE) ?: MODE_STEAM
         suspendPolicy = SessionPrefs.suspendPolicy(this, SessionState.mode)
         activityVisible = true
         screenOn = (getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive ?: true
@@ -196,12 +197,21 @@ class SessionService : Service() {
         // replaces can report its own exit in the gap between the two, and that exit must not
         // be taken as this one's.
         val gen = ++sessionGen
+        if (!SessionProcess.acquireSessionLock(this)) {
+            SessionState.running = false
+            Log.e(TAG, "another ${if (SessionProcess.isExternalDisplay(this)) "external" else "handheld"} session already owns its process lock")
+            SessionEvents.fail("SESSION_ALREADY_RUNNING", "Another DroidDeck session is already running", -1)
+            SessionState.notifyEnded(-1)
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         acquireLocks()
         Thread({
             // A tree the last session left behind (the app was killed or crashed, so its teardown
             // never ran) would hold the rootfs, the GPU and Steam's lock: nothing of ours should
             // be alive between sessions outside this process.
-            OrphanReaper.reap("session starting")
+            OrphanReaper.reap("session starting", this)
             runSession(gen)
         }, "session-start").start()
         // The activity or the notification stops us; the system must not resurrect a session whose
@@ -224,6 +234,26 @@ class SessionService : Service() {
             SessionLogCapture.stopFor(dir)
             SessionPaths.release(this, dir)
         }
+    }
+
+    private fun readPlasmaShellPid(directory: File?): Int {
+        val pidFile = directory?.let { File(it, "plasma-shell.pid") } ?: return -1
+        return runCatching { pidFile.readText().trim().toInt() }.getOrDefault(-1)
+    }
+
+    /** Plasma can outlive KWin when PRoot tears down, so stop this session's recorded shell. */
+    private fun stopPlasmaShell(pid: Int, directory: File?) {
+        if (pid < 2 || directory == null) return
+        val proc = File("/proc/$pid")
+        val command = runCatching {
+            File(proc, "cmdline").readBytes().toString(Charsets.UTF_8).replace('\u0000', ' ')
+        }.getOrDefault("")
+        val environment = runCatching {
+            File(proc, "environ").readBytes().toString(Charsets.UTF_8)
+        }.getOrDefault("")
+        if (!command.contains("plasmashell") || !environment.contains(directory.name)) return
+        android.os.Process.killProcess(pid)
+        Log.i(TAG, "stopped Plasma Mobile shell process $pid")
     }
 
     private fun extraEnv(): List<String> {
@@ -249,18 +279,27 @@ class SessionService : Service() {
 
     private fun runSession(gen: Int) {
         SessionTerminal.clear()
+        val externalDisplay = SessionProcess.isExternalDisplay(this)
+        val plasmaDesktop = externalDisplay || SessionState.mode == MODE_PLASMA_MOBILE ||
+            (SessionState.mode == MODE_DESKTOP &&
+                SessionPrefs.desktopEnvironment(this) == SessionPrefs.DESKTOP_ENV_PLASMA_MOBILE)
+        val root = if (plasmaDesktop) LinuxRuntime.plasmaRootDir(this) else LinuxRuntime.rootDir(this)
+        if (plasmaDesktop && !com.droiddeck.launcher.runtime.DesktopCatalog.plasmaMobileInstalled(this)) {
+            Log.e(TAG, "Plasma Mobile's isolated runtime is not installed or is out of date")
+            stopSession(-1)
+            return
+        }
         try {
-            LinuxRuntime.writeAccounts(this)
+            LinuxRuntime.writeAccounts(this, root)
         } catch (e: Exception) {
             Log.e(TAG, "could not write the guest's passwd/group", e)
             stopSession(-1)
             return
         }
 
-        val root = LinuxRuntime.rootDir(this)
-        val sessionRoot = LinuxRuntime.sessionRoot(this).apply { mkdirs() }
-        val runtimeDir = File(filesDir, ".wayland-rt").apply { mkdirs() }
-        killStragglers()
+        val sessionRoot = LinuxRuntime.sessionRoot(this, externalDisplay).apply { mkdirs() }
+        val runtimeDir = File(filesDir, if (externalDisplay) ".wayland-rt-external-display" else ".wayland-rt").apply { mkdirs() }
+        if (!SessionProcess.hasSiblingProcess(this)) killStragglers()
         SessionFiles.stage(this, root)
 
         // One folder per session, claimed by whoever started first - the activity starts the
@@ -299,7 +338,7 @@ class SessionService : Service() {
         guest.add("MESA_LOADER_DRIVER_OVERRIDE=zink")
         guest.add("GALLIUM_DRIVER=zink")
         guest.add("LIBGL_KOPPER_DRI2=true")
-        LinuxRuntime.vulkanIcd(this)?.let { guest.add("VK_ICD_FILENAMES=" + it.path) }
+        LinuxRuntime.vulkanIcd(root)?.let { guest.add("VK_ICD_FILENAMES=" + it.path) }
         // An imported glibc Turnip for this mode, when the user chose one: the session script checks
         // the manifest and its library from inside and points the loader at it with VK_DRIVER_FILES,
         // so the runtime's own driver above stays untouched and is what a bad import falls back to.
@@ -371,7 +410,7 @@ class SessionService : Service() {
         // top, and the helper only opens an input stream when asked - so a user who wants game
         // sound but no recording gets exactly that, and Android's recording indicator stays off.
         val wantsDirectAudio = SessionState.mode == MODE_STEAM && SessionPrefs.directAudio(this)
-        val wantsMic = SessionPrefs.micEnabled(this) &&
+        val wantsMic = SessionState.mode == MODE_STEAM && SessionPrefs.micEnabled(this) &&
             checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         // Both paths sit under the app's files directory, which the session binds at its own path,
         // so the same string is valid on both sides and nothing has to be translated.
@@ -410,6 +449,11 @@ class SessionService : Service() {
 
         guest.add("BL_WIDTH=" + size.first)
         guest.add("BL_HEIGHT=" + size.second)
+        if (SessionState.mode == MODE_DESKTOP) {
+            guest.add("BL_DESKTOP_ENV=" + SessionPrefs.desktopEnvironment(this))
+        } else if (SessionState.mode == MODE_PLASMA_MOBILE) {
+            guest.add("BL_DESKTOP_ENV=" + SessionPrefs.DESKTOP_ENV_PLASMA_MOBILE)
+        }
         if (SessionState.hdr) {
             // The activity opened the compositor's HDR gate: gamescope offers HDR to its clients
             // and DXVK takes the HDR10 swapchain when a game asks for one.
@@ -504,7 +548,7 @@ class SessionService : Service() {
 
         // Android has no /dev/shm; the cache stands in for it and, unlike the real thing, keeps
         // whatever a session leaves behind. The client abandons tens of megabytes of streams a run.
-        FileUtils.clear(File(cacheDir, "shm"))
+        FileUtils.clear(File(cacheDir, if (externalDisplay) "shm-external-display" else "shm"))
 
         val binds = ArrayList<String>()
         if (controllersOn) binds.add(fakeInputDir.path + ":/dev/input")
@@ -525,8 +569,10 @@ class SessionService : Service() {
         // tree and could not find the phone at all. The same storage is placed under home as
         // well, and the ROMs folder chosen on the main screen beside it; a bind rather than a
         // link, so a folder on an SD card works the same.
-        val home = File(LinuxRuntime.rootDir(this), "root")
+        val home = if (externalDisplay) File(filesDir, "plasma-mobile-home") else File(LinuxRuntime.rootDir(this), "root")
+        home.mkdirs()
         File(home, "Storage").mkdirs()
+        if (externalDisplay) binds.add("${home.path}:/root")
         binds.add(Environment.getExternalStorageDirectory().path + ":/root/Storage")
         // A second Steam library: the storage chosen in the Steam cog, at the path the runtime's
         // bannerlator-steam-library registers with the client. Nothing bound = the script removes
@@ -535,7 +581,7 @@ class SessionService : Service() {
         if (library != null) {
             val problem = GameStorage.prepare(library.path)
             if (problem == null) {
-                File(LinuxRuntime.rootDir(this), "mnt/bannerlator-sd").mkdirs()
+                File(root, "mnt/bannerlator-sd").mkdirs()
                 binds.add("${library.path}:/mnt/bannerlator-sd")
                 Log.i(TAG, "game storage: ${library.path} -> /mnt/bannerlator-sd (\"${library.label}\")")
             } else {
@@ -546,13 +592,13 @@ class SessionService : Service() {
         }
         // The user's own games folder (the Steam cog's "Added games"), bound at a fixed place so
         // the shortcuts the app writes point somewhere whatever storage the folder is on.
-        for (root in com.droiddeck.launcher.frontend.AddedGames.roots(this)) {
-            if (root.host.isDirectory && root.host.canRead()) {
-                File(LinuxRuntime.rootDir(this), root.guest.removePrefix("/")).mkdirs()
-                binds.add(root.host.path + ":" + root.guest)
-                Log.i(TAG, "added games: ${root.host} -> ${root.guest}")
+        for (addedRoot in com.droiddeck.launcher.frontend.AddedGames.roots(this)) {
+            if (addedRoot.host.isDirectory && addedRoot.host.canRead()) {
+                File(root, addedRoot.guest.removePrefix("/")).mkdirs()
+                binds.add(addedRoot.host.path + ":" + addedRoot.guest)
+                Log.i(TAG, "added games: ${addedRoot.host} -> ${addedRoot.guest}")
             } else {
-                Log.w(TAG, "added games: ${root.host} is not a readable folder this session")
+                Log.w(TAG, "added games: ${addedRoot.host} is not a readable folder this session")
             }
         }
         val roms = SessionPrefs.romsDir(this).takeIf { it.isNotEmpty() }?.let { File(it) }
@@ -564,8 +610,8 @@ class SessionService : Service() {
             Log.w(TAG, "roms: $roms is not a readable folder; /root/ROMs not offered this session")
         }
 
-        val command = LinuxRuntime.command(
-            this, sessionRoot, runtimeDir, Environment.getExternalStorageDirectory(), binds, guest,
+        val command = LinuxRuntime.commandForRoot(
+            this, root, sessionRoot, runtimeDir, Environment.getExternalStorageDirectory(), binds, guest,
         )
 
         val hostEnv = HostEnvironment()
@@ -582,8 +628,8 @@ class SessionService : Service() {
         val prootLibs = LinuxRuntime.prootLibraryPath(this)
         if (prootLibs.isNotEmpty()) hostEnv["LD_LIBRARY_PATH"] = prootLibs
 
-        val terminalCommand = LinuxRuntime.command(
-            this, sessionRoot, runtimeDir, Environment.getExternalStorageDirectory(), binds, shellGuest,
+        val terminalCommand = LinuxRuntime.commandForRoot(
+            this, root, sessionRoot, runtimeDir, Environment.getExternalStorageDirectory(), binds, shellGuest,
         )
         val terminalHostEnvironment = LinkedHashMap(System.getenv())
         hostEnv.asArray().forEach { entry ->
@@ -840,6 +886,7 @@ class SessionService : Service() {
                 SessionEvents.fail(code, message, failureStatus)
             }
             SessionState.notifyEnded(status)
+            SessionProcess.releaseSessionLock()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
@@ -847,6 +894,7 @@ class SessionService : Service() {
 
     private fun stopSession(status: Int) {
         if (!SessionState.running) return
+        if (!SessionProcess.isExternalDisplay(this)) stopExternalDisplaySession(this)
         SessionState.running = false
         SessionState.stopRequested = false
         SessionEvents.record("guest.exited", mapOf("status" to status))
@@ -875,6 +923,7 @@ class SessionService : Service() {
         // dump the crash buffer. That was about four and a half seconds of blocked main thread,
         // and Android ANR'd the app for it: the desktop session that would not let go.
         val ended = SessionPaths.take()
+        val plasmaShellPid = readPlasmaShellPid(ended)
         if (ended != null) Thread({ collectSessionArtifacts(ended) }, "session-collect").start()
         components.reversed().forEach {
             try {
@@ -890,9 +939,11 @@ class SessionService : Service() {
                 Thread({
                     auxiliary.forEach { (pid, started) -> teardown(pid, started) }
                     if (prootPid > 1) teardown(prootPid)
+                    stopPlasmaShell(plasmaShellPid, ended)
                     finishSessionStop(status)
                 }, "session-teardown").start()
             } else {
+                stopPlasmaShell(plasmaShellPid, ended)
                 finishSessionStop(status)
             }
         }
@@ -912,6 +963,7 @@ class SessionService : Service() {
 
     override fun onDestroy() {
         stopSession(0)
+        if (!SessionState.running) SessionProcess.releaseSessionLock()
         if (screenReceiverRegistered) {
             unregisterReceiver(screenReceiver)
             screenReceiverRegistered = false
@@ -973,8 +1025,9 @@ class SessionService : Service() {
 
     private fun buildNotification(): Notification {
         val manager = getSystemService(NotificationManager::class.java)
+        val channelId = notificationChannelId()
         // IMPORTANCE_LOW: it must never make a sound or push a heads-up over a game.
-        val channel = NotificationChannel(CHANNEL_ID, getString(R.string.session_channel),
+        val channel = NotificationChannel(channelId, getString(R.string.session_channel),
             NotificationManager.IMPORTANCE_LOW).apply {
             description = getString(R.string.session_channel_description)
             setShowBadge(false)
@@ -984,23 +1037,23 @@ class SessionService : Service() {
         manager?.createNotificationChannel(channel)
 
         val open = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, SessionActivity::class.java)
+            this, notificationId(),
+            Intent(this, sessionActivityClass())
                 .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             PendingIntent.FLAG_IMMUTABLE,
         )
         val stop = PendingIntent.getService(
-            this, 1, Intent(this, SessionService::class.java).setAction(ACTION_STOP),
+            this, notificationId() + 1, Intent(this, sessionServiceClass()).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE,
         )
         val resume = PendingIntent.getActivity(
-            this, 2,
-            Intent(this, SessionActivity::class.java)
+            this, notificationId() + 2,
+            Intent(this, sessionActivityClass())
                 .setAction(ACTION_RESUME)
                 .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        return Notification.Builder(this, CHANNEL_ID)
+        return Notification.Builder(this, channelId)
             .setSmallIcon(R.drawable.ic_stat_session)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(getString(if (SessionState.suspended) R.string.session_notification_paused else R.string.session_notification))
@@ -1018,8 +1071,19 @@ class SessionService : Service() {
     }
 
     private fun refreshNotification() {
-        getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification())
+        getSystemService(NotificationManager::class.java)?.notify(notificationId(), buildNotification())
     }
+
+    private fun notificationId(): Int = if (SessionProcess.isExternalDisplay(this)) EXTERNAL_NOTIFICATION_ID else NOTIFICATION_ID
+
+    private fun notificationChannelId(): String =
+        if (SessionProcess.isExternalDisplay(this)) EXTERNAL_CHANNEL_ID else CHANNEL_ID
+
+    private fun sessionActivityClass(): Class<*> =
+        if (SessionProcess.isExternalDisplay(this)) ExternalSessionActivity::class.java else SessionActivity::class.java
+
+    private fun sessionServiceClass(): Class<*> =
+        if (SessionProcess.isExternalDisplay(this)) ExternalSessionService::class.java else SessionService::class.java
 
     companion object {
         private const val TAG = "SessionService"
@@ -1029,6 +1093,8 @@ class SessionService : Service() {
         private const val ENV_SWITCH = "Download/droiddeck-env"
         private const val CHANNEL_ID = "session"
         private const val NOTIFICATION_ID = 1001
+        private const val EXTERNAL_CHANNEL_ID = "session-external-display"
+        private const val EXTERNAL_NOTIFICATION_ID = 1002
         const val ACTION_STOP = "com.droiddeck.launcher.STOP_SESSION"
         const val ACTION_RESUME = "com.droiddeck.launcher.RESUME_SESSION"
         const val ACTION_HOME_GUIDE = "com.droiddeck.launcher.HOME_GUIDE"
@@ -1041,7 +1107,7 @@ class SessionService : Service() {
         private const val ACTION_AUXILIARY_EXITED = "com.droiddeck.launcher.AUXILIARY_EXITED"
         private const val EXTRA_AUXILIARY_PID = "auxiliaryPid"
         /** Command lines that can only belong to a session of ours. */
-        private val STRAGGLERS = listOf("bannerlator-session", "gamescope", "Xwayland", "steamrtarm64",
+        private val STRAGGLERS = listOf("bannerlator-session", "gamescope", "Xwayland", "kwin_wayland", "kwin_x11", "plasmashell", "steamrtarm64",
             "steamwebhelper", "linuxfs/opt/android-host/proot", "/libproot.so", "pulseaudio/libpulseaudio.so")
         /** How long proot gets to run its own cleanup before it is killed outright. */
         private const val GRACE_MS = 1200L
@@ -1051,6 +1117,7 @@ class SessionService : Service() {
         const val EXTRA_MODE = "mode"
         const val MODE_STEAM = "steam"
         const val MODE_DESKTOP = "lxqt"
+        const val MODE_PLASMA_MOBILE = "plasma-mobile"
         /** A program inside the runtime, fullscreen under gamescope (EXTRA_PROGRAM = its path). */
         const val MODE_RUN = "run"
         const val EXTRA_PROGRAM = "program"
@@ -1061,11 +1128,16 @@ class SessionService : Service() {
         const val EXTRA_STEAM_UI = "steamUi"
         const val EXTRA_STEAM_URL = "steamUrl"
 
+        private fun serviceClass(mode: String): Class<*> =
+            if (mode == MODE_PLASMA_MOBILE) ExternalSessionService::class.java else SessionService::class.java
+
+        private fun currentServiceClass(): Class<*> = serviceClass(SessionState.mode)
+
         fun start(
             context: Context, mode: String = MODE_STEAM, program: String? = null,
             steamUi: String? = null, steamUrl: String? = null, programArgs: Array<String>? = null,
         ) {
-            val intent = Intent(context, SessionService::class.java).putExtra(EXTRA_MODE, mode)
+            val intent = Intent(context, serviceClass(mode)).putExtra(EXTRA_MODE, mode)
             if (program != null) intent.putExtra(EXTRA_PROGRAM, program)
             if (programArgs != null) intent.putExtra(EXTRA_PROGRAM_ARGS, programArgs)
             if (steamUi != null) intent.putExtra(EXTRA_STEAM_UI, steamUi)
@@ -1075,29 +1147,33 @@ class SessionService : Service() {
         }
 
         fun stop(context: Context) {
-            context.startService(Intent(context, SessionService::class.java).setAction(ACTION_STOP))
+            context.startService(Intent(context, currentServiceClass()).setAction(ACTION_STOP))
         }
+
+        /** Stops the independent Linux desktop hosted on the other Android display, if running. */
+        fun stopExternalDisplaySession(context: Context): Boolean =
+            context.stopService(Intent(context, ExternalSessionService::class.java))
 
         fun setActivityVisible(context: Context, visible: Boolean) {
             if (!SessionState.running) return
             val action = if (visible) ACTION_ACTIVITY_VISIBLE else ACTION_ACTIVITY_HIDDEN
-            context.startService(Intent(context, SessionService::class.java).setAction(action))
+            context.startService(Intent(context, currentServiceClass()).setAction(action))
         }
 
         fun resume(context: Context) {
             if (!SessionState.running) return
-            context.startService(Intent(context, SessionService::class.java).setAction(ACTION_RESUME))
+            context.startService(Intent(context, currentServiceClass()).setAction(ACTION_RESUME))
         }
 
         fun suspendPolicyChanged(context: Context) {
             if (!SessionState.running) return
-            context.startService(Intent(context, SessionService::class.java).setAction(ACTION_SUSPEND_POLICY_CHANGED))
+            context.startService(Intent(context, currentServiceClass()).setAction(ACTION_SUSPEND_POLICY_CHANGED))
         }
 
         /** Let the session service clean up the PTY's proot tree if the control screen closes. */
         fun stopTerminalProcess(context: Context, pid: Int) {
             if (pid > 1) context.startService(
-                Intent(context, SessionService::class.java)
+                Intent(context, currentServiceClass())
                     .setAction(ACTION_STOP_AUXILIARY)
                     .putExtra(EXTRA_AUXILIARY_PID, pid),
             )
@@ -1105,7 +1181,7 @@ class SessionService : Service() {
 
         fun registerTerminalProcess(context: Context, pid: Int) {
             if (pid > 1) context.startService(
-                Intent(context, SessionService::class.java)
+                Intent(context, currentServiceClass())
                     .setAction(ACTION_TRACK_AUXILIARY)
                     .putExtra(EXTRA_AUXILIARY_PID, pid),
             )
@@ -1113,7 +1189,7 @@ class SessionService : Service() {
 
         fun terminalProcessExited(context: Context, pid: Int) {
             if (pid > 1) context.startService(
-                Intent(context, SessionService::class.java)
+                Intent(context, currentServiceClass())
                     .setAction(ACTION_AUXILIARY_EXITED)
                     .putExtra(EXTRA_AUXILIARY_PID, pid),
             )

@@ -52,7 +52,12 @@ object DeviceReport {
         b.append("DroidDeck session report\n")
         b.append("========================\n")
         k("Written", SimpleDateFormat("yyyy-MM-dd HH:mm:ss zzz", Locale.US).format(Date()))
-        k("Session mode", when (mode) { SessionService.MODE_DESKTOP -> "desktop (labwc/LXQt)"; SessionService.MODE_RUN -> "a program under gamescope"; else -> "Steam client (gamescope)" })
+        k("Session mode", when (mode) {
+            SessionService.MODE_DESKTOP -> if (SessionPrefs.desktopEnvironment(context) == SessionPrefs.DESKTOP_ENV_PLASMA_MOBILE) "desktop (KDE Plasma Mobile)" else "desktop (labwc/LXQt)"
+            SessionService.MODE_PLASMA_MOBILE -> "secondary desktop (KDE Plasma Mobile)"
+            SessionService.MODE_RUN -> "a program under gamescope"
+            else -> "Steam client (gamescope)"
+        })
 
         h("App")
         runCatching {

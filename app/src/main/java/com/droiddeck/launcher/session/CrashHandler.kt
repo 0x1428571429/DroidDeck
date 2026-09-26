@@ -35,7 +35,7 @@ object CrashHandler {
                     worker.join(8000)
                 }
                 // The session's tree would outlive us otherwise, and block the next launch.
-                OrphanReaper.reap("app crash")
+                OrphanReaper.reap("app crash", context)
             } catch (e: Throwable) {
                 // Nothing more to do for a crash inside the crash handler.
             } finally {

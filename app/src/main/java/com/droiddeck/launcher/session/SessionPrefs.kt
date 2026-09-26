@@ -387,6 +387,25 @@ object SessionPrefs {
         java.io.File(com.droiddeck.launcher.runtime.LinuxRuntime.rootDir(context), "root/.droiddeck-renderer-failed").delete()
     }
 
+    const val DESKTOP_ENV_LXQT = "lxqt"
+    const val DESKTOP_ENV_PLASMA_MOBILE = "plasma-mobile"
+    val desktopEnvironmentChoices = listOf(
+        DESKTOP_ENV_LXQT to "LXQt",
+        DESKTOP_ENV_PLASMA_MOBILE to "KDE Plasma Mobile",
+    )
+
+    /** Shell used when the user opens the primary Desktop button. LXQt remains the default. */
+    fun desktopEnvironment(context: Context): String =
+        prefs(context).getString("desktopEnvironment", DESKTOP_ENV_LXQT)
+            ?.takeIf { value -> desktopEnvironmentChoices.any { it.first == value } }
+            ?: DESKTOP_ENV_LXQT
+
+    fun setDesktopEnvironment(context: Context, environment: String) {
+        val value = environment.takeIf { candidate -> desktopEnvironmentChoices.any { it.first == candidate } }
+            ?: DESKTOP_ENV_LXQT
+        prefs(context).edit().putString("desktopEnvironment", value).apply()
+    }
+
     /**
      * HDR10 output for MODE_STEAM / MODE_DESKTOP. Off by default. Honoured only when the panel
      * lists HDR10 (HdrSupport), and decided when the compositor starts, which is once per app
@@ -402,7 +421,11 @@ object SessionPrefs {
      * The mode whose per-mode settings apply: a program run under gamescope (MODE_RUN) is a
      * fullscreen session like Steam's, so it takes Steam's display, driver and HDR choices.
      */
-    fun prefMode(mode: String): String = if (mode == SessionService.MODE_RUN) SessionService.MODE_STEAM else mode
+    fun prefMode(mode: String): String = when (mode) {
+        SessionService.MODE_RUN -> SessionService.MODE_STEAM
+        SessionService.MODE_PLASMA_MOBILE -> SessionService.MODE_DESKTOP
+        else -> mode
+    }
 
     fun suspendPolicy(context: Context, mode: String): String =
         prefs(context).getString("suspendPolicy.${prefMode(mode)}", SUSPEND_MANUAL)

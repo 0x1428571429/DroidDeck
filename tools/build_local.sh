@@ -113,6 +113,7 @@ docker run --rm --platform linux/amd64 \
             [ -f "$f" ] && install -Dm644 "$f" "$d/${f#tools/linuxfs/overlay/}"
         done
         install -Dm644 tools/linuxfs/desktop/droiddeck-desktop "$d/usr/local/bin/droiddeck-desktop"
+        install -Dm644 tools/linuxfs/desktop/droiddeck-plasma-mobile "$d/usr/local/bin/droiddeck-plasma-mobile"
         install -Dm644 tools/linuxfs/desktop/droiddeck-gpu "$d/usr/local/bin/droiddeck-gpu"
         install -Dm644 tools/linuxfs/desktop/droiddeck-desktop-gpu "$d/usr/local/bin/droiddeck-desktop-gpu"
         install -Dm644 tools/linuxfs/desktop/autostart "$d/etc/xdg/labwc/autostart"
@@ -290,7 +291,7 @@ rm -f "${apk}.aligned" "${apk}.idsig"
 
 signature_output=$("${build_tools}/apksigner" verify --min-sdk-version 21 --verbose --print-certs "${apk}")
 printf '%s\n' "${signature_output}"
-if ! unzip -l "${apk}" | grep -qE 'META-INF/.*\.(SF|RSA|DSA)$'; then
+if ! unzip -l "${apk}" | grep -E 'META-INF/.*\.(SF|RSA|DSA)$' >/dev/null; then
     echo "APK signature check failed: JAR signature files are missing." >&2
     exit 1
 fi

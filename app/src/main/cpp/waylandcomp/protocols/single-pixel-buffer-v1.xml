@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="single_pixel_buffer_v1">
+  <copyright>
+    Copyright © 2022 Simon Ser
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+  </copyright>
+  <description summary="single pixel buffer factory">
+    Create one-pixel buffers that clients can scale with the viewporter protocol.
+  </description>
+  <interface name="wp_single_pixel_buffer_manager_v1" version="1">
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">Child buffers are unaffected.</description>
+    </request>
+    <request name="create_u32_rgba_buffer">
+      <description summary="create a 1x1 buffer from 32-bit RGBA values">
+        Channel values are premultiplied and range from 0 to 0xffffffff.
+      </description>
+      <arg name="id" type="new_id" interface="wl_buffer"/>
+      <arg name="r" type="uint"/>
+      <arg name="g" type="uint"/>
+      <arg name="b" type="uint"/>
+      <arg name="a" type="uint"/>
+    </request>
+  </interface>
+</protocol>

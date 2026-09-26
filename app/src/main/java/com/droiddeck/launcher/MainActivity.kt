@@ -111,6 +111,8 @@ class MainActivity : ComponentActivity() {
     private var pkgStage by mutableStateOf<String?>(null)
     private var pkgPercent by mutableIntStateOf(-1)
     private var desktopInstalled by mutableStateOf(false)
+    private var plasmaMobileInstalled by mutableStateOf(false)
+    private var desktopEnvironment by mutableStateOf(SessionPrefs.DESKTOP_ENV_LXQT)
     private var offlineAccount by mutableStateOf<String?>(null)
     private var offline by mutableStateOf(false)
     private var protonRows by mutableStateOf<List<ProtonRow>>(emptyList())
@@ -712,6 +714,8 @@ class MainActivity : ComponentActivity() {
                 forceFullscreen = if (mode == SessionService.MODE_STEAM) forceFullscreen else null,
                 mic = if (mode == SessionService.MODE_STEAM) mic else null,
                 renderer = if (mode == SessionService.MODE_DESKTOP) renderer else null,
+                desktopEnvironment = if (mode == SessionService.MODE_DESKTOP) desktopEnvironment else null,
+                plasmaMobileInstalled = plasmaMobileInstalled,
                 gameStorage = if (mode == SessionService.MODE_STEAM) gameStorage else null,
                 storageOptions = storageOptions,
                 fexPreset = if (mode == SessionService.MODE_STEAM) fexPreset else null,
@@ -760,6 +764,10 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onRenderer = { r -> SessionPrefs.setDesktopRenderer(this, r); renderer = r },
+                onDesktopEnvironment = { value ->
+                    SessionPrefs.setDesktopEnvironment(this, value)
+                    desktopEnvironment = SessionPrefs.desktopEnvironment(this)
+                },
                 onGameStorage = { path, label -> setGameStorage(path, label) },
                 onPickGameStorageFolder = {
                     pickGameStorage.launch(InAppFilePicker.buildDirIntent(this, "Choose the game storage folder", gameStorage.ifEmpty { null }))
@@ -1073,6 +1081,8 @@ class MainActivity : ComponentActivity() {
 
     private fun refresh() {
         desktopInstalled = DesktopCatalog.desktopInstalled(this)
+        plasmaMobileInstalled = DesktopCatalog.plasmaMobileInstalled(this)
+        desktopEnvironment = SessionPrefs.desktopEnvironment(this)
         offlineAccount = OfflineMode.account(this)
         offline = OfflineMode.enabled(this)
         installed = LinuxRuntimeInstaller.installedVersion(this)
