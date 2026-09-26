@@ -1,0 +1,13 @@
+diff --git a/runtime/scripts/build-shadps4-arm64.sh b/runtime/scripts/build-shadps4-arm64.sh
+index 49c35fa..2bdcba0 100644
+--- a/runtime/scripts/build-shadps4-arm64.sh
++++ b/runtime/scripts/build-shadps4-arm64.sh
+@@ -74,6 +74,8 @@ cmake -S "$project_root" -B "$build_dir" -G Ninja \
+   -DXEXT_LIB:FILEPATH="$arm64_xext_lib" \
+   -DIMGUI_FONT_EMBED_EXECUTABLE="$host_font_embed" \
+   -DCMAKE_BUILD_TYPE=Release \
++  -DCMAKE_C_COMPILER_LAUNCHER=ccache \
++  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+   -DCMAKE_CXX_SCAN_FOR_MODULES=OFF \
+   -DCMAKE_AR="$llvm_ar" \
+   -DCMAKE_RANLIB="$llvm_ranlib" \

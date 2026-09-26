@@ -53,11 +53,11 @@ done
 # only through it, and without it builds ALSA alone.
 export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
 pkg-config --modversion libpulse
-# Every CMake project the build configures (FEXCore, shadPS4 and its externals) compiles through
-# ccache; the cache lives in the workspace (.ccache) and the workflow keeps it between runs.
+# FEXCore compiles through ccache on its own once it is installed, and patches/0005 hands
+# shadPS4's configure the same launcher; the cache lives in the workspace (.ccache) and the
+# workflow keeps it between runs.
 export CCACHE_DIR=$WORK/.ccache CCACHE_BASEDIR=$WORK CCACHE_NOHASHDIR=1 \
-  CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=4G \
-  CMAKE_C_COMPILER_LAUNCHER=ccache CMAKE_CXX_COMPILER_LAUNCHER=ccache
+  CCACHE_COMPILERCHECK=content CCACHE_MAXSIZE=4G
 ccache -z
 bash "$SRC/runtime/scripts/build-shadps4-arm64.sh"
 ccache -s
