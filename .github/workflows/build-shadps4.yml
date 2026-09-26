@@ -1,0 +1,47 @@
+name: Build shadPS4 (ARM64)
+
+# The PS4 emulator package: the ARM64 shadPS4 core (FEXCore runs the PS4's x86-64 code) from
+# tools/shadps4/source.env, with tools/shadps4/patches so it runs stand-alone in the runtime (SDL
+# controllers, PulseAudio), packed as shadps4.AppImage. Published as a release asset the hosted
+# package catalog points at; the apk does not carry it.
+on:
+  push:
+    paths:
+      - 'tools/shadps4/**'
+      - '.github/workflows/build-shadps4.yml'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish as (e.g. shadps4-be6bc2e-p1); empty = artifact only'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build in Debian trixie
+        run: |
+          set -euo pipefail
+          df -h /
+          docker run --rm -v "$PWD:/work" -w /work debian:trixie bash tools/shadps4/build-in-debian.sh
+          sudo chown -R "$(id -u):$(id -g)" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shadps4-appimage
+          path: |
+            shadps4.AppImage
+            shadps4.AppImage.sha256
+      - name: Publish
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . tools/shadps4/source.env
+          gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --notes "shadPS4 ARM64 (FEXCore guest CPU) from ${SHADPS4_REPO} @ ${SHADPS4_REV} with tools/shadps4/patches; installed by the app to /opt/appimages/shadps4.AppImage. sha256 $(cut -d' ' -f1 shadps4.AppImage.sha256)" shadps4.AppImage shadps4.AppImage.sha256 || gh release upload "${{ inputs.tag }}" shadps4.AppImage shadps4.AppImage.sha256 --clobber

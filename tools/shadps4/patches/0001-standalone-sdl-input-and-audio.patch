@@ -1,0 +1,111 @@
+diff --git a/src/core/libraries/audio/audioout.cpp b/src/core/libraries/audio/audioout.cpp
+index 2e28f7d..91ec84f 100644
+--- a/src/core/libraries/audio/audioout.cpp
++++ b/src/core/libraries/audio/audioout.cpp
+@@ -1,6 +1,7 @@
+ // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
++#include <cstdlib>
+ #include <cstring>
+ #include <memory>
+ #include <mutex>
+@@ -207,14 +208,15 @@ s32 PS4_SYSV_ABI sceAudioOutInit() {
+     }
+ 
+ #ifdef ENABLE_BACHATA_RUNTIME
+-    audio = std::make_unique<BachataAudioOut>();
+-#else
++    if (std::getenv("BACHATA_ALSA_SOCKET") != nullptr) {
++        audio = std::make_unique<BachataAudioOut>();
++    } else
++#endif
+     if (EmulatorSettings.GetAudioBackend() == AudioBackend::OpenAL) {
+         audio = std::make_unique<OpenALAudioOut>();
+     } else {
+         audio = std::make_unique<SDLAudioOut>();
+     }
+-#endif
+ 
+     LOG_INFO(Lib_AudioOut, "Audio system initialized");
+     return ORBIS_OK;
+diff --git a/src/main.cpp b/src/main.cpp
+index 13733ed..d28319e 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -298,6 +298,8 @@ int main(int argc, char* argv[]) {
+             return 1;
+         }
+         runtime_client = std::move(*connected);
++        // Stand-alone runs (no socket) keep SDL controllers and SDL audio.
++        setenv("BACHATA_MANAGED", "1", 1);
+         if (!runtime_client.SendStarting()) {
+             std::cerr << "Failed to send Bachata Starting event\n";
+             return 1;
+diff --git a/src/sdl_window.cpp b/src/sdl_window.cpp
+index ffa42d3..0785fc3 100644
+--- a/src/sdl_window.cpp
++++ b/src/sdl_window.cpp
+@@ -27,6 +27,8 @@
+ #include "input/input_handler.h"
+ #include "input/input_mouse.h"
+ #include "sdl_window.h"
++
++#include <cstdlib>
+ #include "video_core/renderdoc.h"
+ 
+ #ifdef __APPLE__
+@@ -39,6 +41,14 @@ CMRC_DECLARE(res);
+ 
+ namespace Frontend {
+ 
++#ifdef ENABLE_BACHATA_RUNTIME
++// The Android runtime delivers controllers over its socket; a stand-alone run uses SDL like
++// the desktop build.
++static bool BachataManaged() {
++    return std::getenv("BACHATA_MANAGED") != nullptr;
++}
++#endif
++
+ using namespace Libraries::Pad;
+ 
+ static OrbisPadButtonDataOffset SDLGamepadToOrbisButton(u8 button) {
+@@ -153,9 +163,10 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, Input::GameControllers* controller
+     SDL_SetWindowFullscreen(window, EmulatorSettings.IsFullScreen());
+     SDL_SyncWindow(window);
+ 
+-#ifndef ENABLE_BACHATA_RUNTIME
+-    SDL_InitSubSystem(SDL_INIT_GAMEPAD);
++#ifdef ENABLE_BACHATA_RUNTIME
++    if (!BachataManaged())
+ #endif
++        SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+ 
+ #if defined(SDL_PLATFORM_WIN32)
+     window_info.type = WindowSystemType::Windows;
+@@ -183,9 +194,10 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, Input::GameControllers* controller
+     // input handler init-s
+     Input::ControllerOutput::LinkJoystickAxes();
+     Input::ParseInputConfig(std::string(Common::ElfInfo::Instance().GameSerial()));
+-#ifndef ENABLE_BACHATA_RUNTIME
+-    controllers.TryOpenSDLControllers();
++#ifdef ENABLE_BACHATA_RUNTIME
++    if (!BachataManaged())
+ #endif
++        controllers.TryOpenSDLControllers();
+ 
+     if (EmulatorSettings.IsBackgroundControllerInput()) {
+         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+@@ -266,9 +278,10 @@ void WindowSDL::WaitEvent() {
+         break;
+     case SDL_EVENT_GAMEPAD_ADDED:
+     case SDL_EVENT_GAMEPAD_REMOVED:
+-#ifndef ENABLE_BACHATA_RUNTIME
+-        controllers.TryOpenSDLControllers();
++#ifdef ENABLE_BACHATA_RUNTIME
++        if (!BachataManaged())
+ #endif
++            controllers.TryOpenSDLControllers();
+         break;
+     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+     case SDL_EVENT_GAMEPAD_BUTTON_UP:
