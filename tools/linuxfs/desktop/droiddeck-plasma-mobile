@@ -34,6 +34,7 @@ if ! command -v plasmashell >/dev/null 2>&1 || ! command -v dbus-run-session >/d
 fi
 
 plasma_log="${BL_DEBUG_DIR:-/tmp}/plasma.log"
+wayland_info_log="${BL_DEBUG_DIR:-/tmp}/plasma-wayland-info.log"
 echo "== Plasma $(plasmashell --version 2>&1)"
 echo "== Wayland display ${WAYLAND_DISPLAY:-wayland-0}; XDG runtime $XDG_RUNTIME_DIR"
 mkdir -p /tmp || exit 73
@@ -42,6 +43,7 @@ export TMPDIR=/tmp
 echo "== temporary directories: $(ls -ld /tmp /dev/shm 2>&1)"
 echo "== preparing the KDE Plasma Mobile Wayland session"
 : >"$plasma_log"
+: >"$wayland_info_log"
 
 # Gamescope's Zink override is for game clients. KWin owns the Plasma Mobile session and presents
 # one nested Wayland window through Bannerlator's host compositor.
@@ -62,7 +64,8 @@ if [ -f "$systemd_dbus_service" ]; then
   mv "$systemd_dbus_service" "$systemd_dbus_service_disabled" || echo "== could not disable session-bus activation for systemd1"
 fi
 trap restore_systemd_dbus_service EXIT
-dbus-run-session -- sh -c '
+dbus-run-session -- env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" plasma_log="$plasma_log" \
+  wayland_info_log="$wayland_info_log" sh -c '
     export WAYLAND_DISPLAY=wayland-0
     width=${BL_WIDTH:-1280}
     height=${BL_HEIGHT:-720}
@@ -73,7 +76,7 @@ dbus-run-session -- sh -c '
       --socket=wayland-1 \
       --width="$width" --height="$height" --fullscreen \
       --no-lockscreen --no-global-shortcuts --no-kactivities \
-      >"$plasma_log" 2>&1 &
+      >>"$plasma_log" 2>&1 &
     kwin_pid=$!
     plasmashell_pid=
     cleanup() {
@@ -88,8 +91,16 @@ dbus-run-session -- sh -c '
       sleep 0.1
     done
     ready=0
-    if [ "$socket_ready" -eq 1 ] && timeout 5 env WAYLAND_DISPLAY=wayland-1 wayland-info >/dev/null 2>&1; then
-      ready=1
+    if [ "$socket_ready" -eq 1 ]; then
+      if timeout 5 env WAYLAND_DISPLAY=wayland-1 wayland-info >"$wayland_info_log" 2>&1; then
+        ready=1
+      else
+        wayland_info_status=$?
+        echo "== nested Wayland protocol probe failed with status $wayland_info_status"
+        cat "$wayland_info_log"
+      fi
+    else
+      echo "== nested KWin exited before creating wayland-1 socket"
     fi
     if [ "$ready" -ne 1 ]; then
       echo "== KDE nested Wayland compositor did not become ready"
