@@ -7,6 +7,42 @@ the timeline, then lessons and backlog. Companion to the README (what the app *d
 
 ---
 
+## 2026-09-26 - `feat/ps4-shadps4` (PARKED): PS4 through shadPS4, emulators from the catalog
+
+State: **branch `feat/ps4-shadps4` = main `c950d31` + 5 commits** (head `9daf41e`, not a PR yet). Parked by
+the owner after the first game test: the DroidDeck side works; the emulator core aborts on this device.
+
+- **shadPS4 package** (`tools/shadps4`, `.github/workflows/build-shadps4.yml`): the ARM64 shadPS4 core
+  (zenithblue-oss/shadps4-arm64 `be6bc2e9`, from the Bachata S4 project, GPL-2.0; FEXCore runs the PS4's
+  x86-64 code) cross-built in Debian trixie with a patch so it runs stand-alone: SDL controllers and SDL audio
+  (PulseAudio) when there is no Bachata control socket. Packed as `shadps4.AppImage` (AppRun: no arguments =
+  Big Picture game list; the first time, `ROMs/ps4` is added to its game folders). Published as a release
+  asset in winlator-contents `steamdeck-desktop-r1` (the org repo is private). Needs only the runtime's own
+  libraries (libc/libm/libstdc++/libgcc_s/libudev/libuuid).
+- **Emulators described by the catalog**: a `desktop.json` row with a `"frontend"` block (system, folders,
+  file types or a game-folder file, title/art paths, args with `{game}`, icon URL) becomes a front-end tile
+  with no app change; the last catalog read is kept for offline use. shadPS4 is the first: a game is a
+  dumped folder with `eboot.bin` (title from `sce_sys/param.sfo`, art `sce_sys/icon0.png`, `-UPDATE` /
+  `-patch` folders left out), launched `-f true -g <eboot>`.
+- **Per-device catalog override**: `Download/droiddeck-catalog-url` (one https URL) points one device at
+  another catalog (listed in the device report). The shadPS4 row lives on winlator-contents branch
+  `feat/shadps4`, not main; the test device reads it through the override.
+- **Device test** (Pocket FIT, repacked build `9daf41e`): tile appears ("Select to install"), installs,
+  lists God of War III Remastered (CUSA01715) with its icon and title, launches full screen; controller
+  found, Turnip Adreno 750 Vulkan up, ~55 frames presented - then the game aborts (SIGABRT, exit 134;
+  the AppImage runtime reports 127, the session 0) right after the game starts a thread. Same with the 1.01
+  update's eboot. **Bachata S4 0.2.3's own app fails the same way on this device**, without proot:
+  `BACHATA_FEX_MAPPING_FAIL reason=invalid_proc_maps` / `FEX guest callback pthread start failed at stage 1:
+  14` - an emulator-core bug at FEX guest-thread start, not DroidDeck's.
+- Games come from PKGs via the owner's separate app, PS4 PKG Extractor (private repo); GoW3 extracted and
+  verified (12,022 files, 54.25 GB).
+- **Open when resumed**: prefer `<ID>-UPDATE/eboot.bin` when an update exists (shadPS4 applies an update
+  only when booted from it); tile name "shadPS4" (the row's name is long); try other games; report the
+  FEX thread-start failure upstream with the Bachata diagnostic; then the DroidDeck PR, and the catalog row
+  last (it goes live to every install).
+
+---
+
 ## 2026-09-25 - main `8cdedbe`: melonDS out of the box, touch in Big Picture, log privacy, Decky
 
 State: **main = `8cdedbe`** (PR #22 merge). Device-tested on the AYANEO Pocket FIT (repacked test builds)
