@@ -735,6 +735,12 @@ open class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         }
         val panelW = maxOf(bounds.width(), bounds.height()).toFloat()
         val panelH = minOf(bounds.width(), bounds.height()).toFloat()
+        // Plasma Mobile on a secondary display is a full external desktop. Use that display's
+        // logical panel size directly; the handheld's saved 16:9 floor and 720p cap otherwise
+        // leave large bars on the external screen.
+        if (SessionProcess.isExternalDisplay(this)) {
+            return Pair(panelW.toInt() and 1.inv(), panelH.toInt() and 1.inv())
+        }
         // Never narrower than 16:9. A foldable's inner panel is nearly square, and a game handed a
         // square display draws for the frame it was made for and cuts the sides off itself.
         // Wider than 16:9 is fine - games and the client cope with a phone's 20:9 - so the
