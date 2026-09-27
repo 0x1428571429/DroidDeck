@@ -60,6 +60,12 @@ object SessionFiles {
         val desktop = arrayOf(
             "usr/local/bin/droiddeck-desktop" to "usr/local/bin/droiddeck-desktop",
             "usr/local/bin/droiddeck-plasma-mobile" to "usr/local/bin/droiddeck-plasma-mobile",
+            // Plasma Mobile 6.7.5 backports: populate the Folio app catalog without a Wayland
+            // connection handle and reset the native mobile task switcher's gesture state.
+            "usr/lib/qt6/plugins/plasma/applets/org.kde.plasma.mobile.homescreen.folio.so" to "usr/lib/qt6/plugins/plasma/applets/org.kde.plasma.mobile.homescreen.folio.so",
+            "usr/lib/qt6/qml/org/kde/plasma/private/mobileshell/taskswitcherplugin/libmobiletaskswitcherplugin.so" to "usr/lib/qt6/qml/org/kde/plasma/private/mobileshell/taskswitcherplugin/libmobiletaskswitcherplugin.so",
+            "usr/share/kwin/effects/mobiletaskswitcher/contents/ui/FlickContainer.qml" to "usr/share/kwin/effects/mobiletaskswitcher/contents/ui/FlickContainer.qml",
+            "usr/share/kwin/effects/mobiletaskswitcher/contents/ui/TaskSwitcher.qml" to "usr/share/kwin/effects/mobiletaskswitcher/contents/ui/TaskSwitcher.qml",
             // Games and emulators from the menu, full screen in a gamescope of their own.
             "usr/local/bin/droiddeck-gpu" to "usr/local/bin/droiddeck-gpu",
             "usr/local/bin/droiddeck-desktop-gpu" to "usr/local/bin/droiddeck-desktop-gpu",

@@ -17,6 +17,8 @@ import java.io.File
  */
 object DesktopCatalog {
     private const val TAG = "DesktopCatalog"
+    /** Advance this when the Plasma root's required package set changes. */
+    internal const val PLASMA_MOBILE_PACKAGE_REVISION = "archlinuxarm-plasma-apps-v2"
     const val CATALOG_URL = "https://raw.githubusercontent.com/The412Banner/winlator-contents/main/desktop.json"
 
     class Entry(
@@ -66,7 +68,7 @@ object DesktopCatalog {
     fun plasmaMobileInstalled(context: Context): Boolean {
         val root = LinuxRuntime.plasmaRootDir(context)
         return LinuxRuntime.isPlasmaRootCurrent(context) &&
-            plasmaMobileMarker(context).isFile &&
+            FileUtils.readString(plasmaMobileMarker(context))?.trim() == PLASMA_MOBILE_PACKAGE_REVISION &&
             File(root, "usr/bin/kwin_wayland").isFile &&
             File(root, "usr/bin/plasmashell").isFile &&
             File(root, "usr/share/plasma/shells/org.kde.plasma.mobileshell").isDirectory

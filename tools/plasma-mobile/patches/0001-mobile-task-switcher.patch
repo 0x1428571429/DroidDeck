@@ -1,0 +1,278 @@
+diff --git a/kwin/mobiletaskswitcher/package/contents/ui/FlickContainer.qml b/kwin/mobiletaskswitcher/package/contents/ui/FlickContainer.qml
+index 8f89960..8a80991 100644
+--- a/kwin/mobiletaskswitcher/package/contents/ui/FlickContainer.qml
++++ b/kwin/mobiletaskswitcher/package/contents/ui/FlickContainer.qml
+@@ -25,10 +25,16 @@ Flickable {
+ 
+     readonly property real startContentX: (taskSwitcherHelpers.taskWidth + taskSwitcherHelpers.taskSpacing) * tasksCount
+     property bool movingRight: false // TODO needed for flickable not flicking workaround
++    property bool resettingPosition: false
+ 
+     // update position from horizontal flickable movement
+     property real oldContentX
+     onContentXChanged: {
++        if (resettingPosition) {
++            oldContentX = contentX;
++            return;
++        }
++
+         // disable if animations are running to prevent bugs
+         if (taskSwitcherHelpers.currentlyBeingClosed) {return}
+ 
+@@ -43,6 +49,8 @@ Flickable {
+ 
+     onMovementStarted: {
+         if (taskSwitcherHelpers.currentlyBeingClosed) {return}
++        oldContentX = contentX;
++        movingRight = false;
+         taskSwitcherHelpers.cancelAnimations();
+     }
+     onMovementEnded: {
+@@ -63,6 +71,8 @@ Flickable {
+     onDraggingChanged: {
+         if (taskSwitcherHelpers.currentlyBeingClosed) {return}
+         if (dragging) {
++            oldContentX = contentX;
++            movingRight = false;
+             taskSwitcherHelpers.cancelAnimations();
+         } else {
+             resetPosition();
+@@ -70,7 +80,14 @@ Flickable {
+     }
+ 
+     function resetPosition(): void {
++        resettingPosition = true;
++        cancelFlick();
+         oldContentX = startContentX;
+         contentX = startContentX;
++        movingRight = false;
++        Qt.callLater(() => {
++            oldContentX = contentX;
++            resettingPosition = false;
++        });
+     }
+ }
+diff --git a/kwin/mobiletaskswitcher/package/contents/ui/TaskSwitcher.qml b/kwin/mobiletaskswitcher/package/contents/ui/TaskSwitcher.qml
+index e614639..ca3908e 100644
+--- a/kwin/mobiletaskswitcher/package/contents/ui/TaskSwitcher.qml
++++ b/kwin/mobiletaskswitcher/package/contents/ui/TaskSwitcher.qml
+@@ -85,11 +85,12 @@ FocusScope {
+ 
+     Keys.onEscapePressed: hide();
+ 
+-    Component.onCompleted: {
+-        initialSetup();
+-    }
+-
+     function initialSetup(): void {
++        closeAnim.stop();
++        container.opacity = 1;
++        closeAllButton.closeRequested = false;
++        oldTasksCount = tasksCount;
++
+         taskSwitcherHelpers.cancelAnimations();
+         state.updateWasInActiveTask(KWinComponents.Workspace.activeWindow);
+ 
+@@ -102,12 +103,14 @@ FocusScope {
+         taskSwitcherHelpers.hasVibrated = false;
+ 
+         taskSwitcherHelpers.closingFactor = 1;
++        taskSwitcherHelpers.closingScalingFactor = 1;
+ 
+         taskSwitcherHelpers.taskSwitchCanLaunch = false;
+         taskSwitchCanLaunchTimer.restart()
+ 
+         taskList.taskOffsetEasing = Easing.InOutQuart;
+         taskList.homeTouchPositionX = 0;
++        flickable.resetPosition();
+ 
+         backgroundColorOpacityAn.enabled = false;
+         backgroundColorOpacity = state.wasInActiveTask ? 1 : 0;
+@@ -161,6 +164,11 @@ FocusScope {
+     Connections {
+         target: root.state
+ 
++        function onActivated(): void {
++            root.tasksModel.refresh();
++            root.initialSetup();
++        }
++
+         // task scrub mode allows scrubbing through a number of tasks with a mostly horizontal motion
+         function taskScrubMode(): void {
+             taskList.setTaskOffsetValue(0, false, Easing.OutQuart);
+@@ -827,4 +835,3 @@ FocusScope {
+         }
+     }
+ }
+-
+diff --git a/kwin/mobiletaskswitcher/plugin/mobiletaskswitchereffect.cpp b/kwin/mobiletaskswitcher/plugin/mobiletaskswitchereffect.cpp
+index 5c2f376..e8baaff 100644
+--- a/kwin/mobiletaskswitcher/plugin/mobiletaskswitchereffect.cpp
++++ b/kwin/mobiletaskswitcher/plugin/mobiletaskswitchereffect.cpp
+@@ -35,8 +35,11 @@ void MobileTaskSwitcherState::init(KWin::QuickSceneEffect *parent)
+     m_border = new EffectTouchBorder{m_effectState};
+     m_taskModel = new TaskModel{parent};
+     m_effect = parent;
++    m_effect->setViewCachingEnabled(true);
+ 
+     // Connect signals
++    connect(m_effect, &QuickSceneEffect::activated, this, &MobileTaskSwitcherState::activated);
++    connect(m_effect, &QuickSceneEffect::deactivated, this, &MobileTaskSwitcherState::deactivated);
+     connect(this, &MobileTaskSwitcherState::gestureEnabledChanged, this, &MobileTaskSwitcherState::refreshBorders);
+     connect(m_border, &EffectTouchBorder::touchPositionChanged, this, &MobileTaskSwitcherState::processTouchPositionChanged);
+     connect(this, &MobileTaskSwitcherState::gestureInProgressChanged, this, [this]() {
+@@ -223,13 +226,10 @@ void MobileTaskSwitcherState::restartDoubleClickTimer()
+ 
+ void MobileTaskSwitcherState::calculateFilteredVelocity(qreal primaryDelta, qreal orthogonalDelta)
+ {
+-    static qreal prevPrimaryDelta = 0;
+-    static qreal prevOrthogonalDelta = 0;
+-
+     qint64 frameTime = 0;
+     if (!m_frameTimer.isValid()) {
+-        prevPrimaryDelta = 0;
+-        prevOrthogonalDelta = 0;
++        m_previousPrimaryDelta = primaryDelta;
++        m_previousOrthogonalDelta = orthogonalDelta;
+         m_frameTimer.start();
+         return;
+     }
+@@ -239,10 +239,10 @@ void MobileTaskSwitcherState::calculateFilteredVelocity(qreal primaryDelta, qrea
+         return;
+     }
+ 
+-    qreal framePrimaryDelta = primaryDelta - prevPrimaryDelta;
+-    qreal frameOrthogonalDelta = orthogonalDelta - prevOrthogonalDelta;
+-    prevPrimaryDelta = primaryDelta;
+-    prevOrthogonalDelta = orthogonalDelta;
++    qreal framePrimaryDelta = primaryDelta - m_previousPrimaryDelta;
++    qreal frameOrthogonalDelta = orthogonalDelta - m_previousOrthogonalDelta;
++    m_previousPrimaryDelta = primaryDelta;
++    m_previousOrthogonalDelta = orthogonalDelta;
+ 
+     // Implements an exponentially weighted moving average (EWMA) filter (= exponential smoothing)
+     // Smoothing factor is approximated each event to achieve a chosen filter time constant
+@@ -253,6 +253,24 @@ void MobileTaskSwitcherState::calculateFilteredVelocity(qreal primaryDelta, qrea
+     Q_EMIT velocityChanged();
+ }
+ 
++void MobileTaskSwitcherState::clearVelocityFilter()
++{
++    m_frameTimer.invalidate();
++    m_previousPrimaryDelta = 0;
++    m_previousOrthogonalDelta = 0;
++    m_xVelocity = 0;
++    m_yVelocity = 0;
++    m_totalSquaredVelocity = 0;
++    Q_EMIT velocityChanged();
++}
++
++void MobileTaskSwitcherState::resetGestureState()
++{
++    m_touchXPosition = 0;
++    m_touchYPosition = 0;
++    clearVelocityFilter();
++}
++
+ void MobileTaskSwitcherState::processTouchPositionChanged(qreal primaryDelta, qreal orthogonalDelta)
+ {
+     calculateFilteredVelocity(primaryDelta, orthogonalDelta);
+@@ -289,6 +307,7 @@ void MobileTaskSwitcherState::activate()
+         return;
+     }
+ 
++    resetGestureState();
+     m_effectState->setInProgress(false);
+     invokeEffect();
+ }
+@@ -339,6 +358,8 @@ void MobileTaskSwitcherState::setDBusState(bool active)
+ 
+ void MobileTaskSwitcherState::invokeEffect()
+ {
++    m_shutdownTimer->stop();
++    resetGestureState();
+     setInitialTaskIndex(currentTaskIndex()); // TODO! this is only until the crashing bug is fixed and recency sorting is in
+     m_effect->setRunning(true);
+     setDBusState(true);
+diff --git a/kwin/mobiletaskswitcher/plugin/mobiletaskswitchereffect.h b/kwin/mobiletaskswitcher/plugin/mobiletaskswitchereffect.h
+index d85f1cc..0aae2a7 100644
+--- a/kwin/mobiletaskswitcher/plugin/mobiletaskswitchereffect.h
++++ b/kwin/mobiletaskswitcher/plugin/mobiletaskswitchereffect.h
+@@ -144,6 +144,7 @@ private Q_SLOTS:
+ 
+ private:
+     void invokeEffect();
++    void resetGestureState();
+ 
+     bool m_gestureEnabled{false};
+     EffectTouchBorderState *m_effectState{nullptr};
+@@ -154,8 +155,8 @@ private:
+     Status m_status = Status::Inactive;
+     bool m_gestureInProgress = false;
+ 
+-    int m_currentTaskIndex;
+-    int m_initialTaskIndex;
++    int m_currentTaskIndex = 0;
++    int m_initialTaskIndex = 0;
+ 
+     void clearVelocityFilter();
+     void calculateFilteredVelocity(qreal primaryPosition, qreal orthogonalPosition);
+@@ -163,22 +164,24 @@ private:
+ 
+     // velocities in (logical) pixels/msec
+     QElapsedTimer m_frameTimer;
++    qreal m_previousPrimaryDelta = 0;
++    qreal m_previousOrthogonalDelta = 0;
+     qreal m_flickVelocityThreshold = 0.5 * 0.5; // squared because total velocity is kept as a square
+     qreal m_filterTimeConstant = 0.03; // time constant of velocity filter
+ 
+-    qreal m_touchXPosition;
+-    qreal m_touchYPosition;
++    qreal m_touchXPosition = 0;
++    qreal m_touchYPosition = 0;
+     qreal m_xVelocity = 0;
+     qreal m_yVelocity = 0;
+     // Using the square of velocity for the total (2-axis) because we just need it
+     // for one threshold comparison and we skip having to calculate the square root
+-    qreal m_totalSquaredVelocity;
++    qreal m_totalSquaredVelocity = 0;
+ 
+     // Positions of the task switcher effect itself
+     qreal m_xPosition = 0;
+     qreal m_yPosition = 0;
+ 
+-    bool m_wasInActiveTask;
++    bool m_wasInActiveTask = false;
+ 
+     QElapsedTimer *m_doubleClickTimer;
+     qint64 getDoubleClickInterval() const
+diff --git a/kwin/mobiletaskswitcher/plugin/taskfiltermodel.cpp b/kwin/mobiletaskswitcher/plugin/taskfiltermodel.cpp
+index 59e1f48..6e04c86 100644
+--- a/kwin/mobiletaskswitcher/plugin/taskfiltermodel.cpp
++++ b/kwin/mobiletaskswitcher/plugin/taskfiltermodel.cpp
+@@ -43,6 +43,12 @@ void TaskFilterModel::setWindowModel(TaskModel *taskModel)
+     sort(0);
+ }
+ 
++void TaskFilterModel::refresh()
++{
++    invalidateFilter();
++    sort(0);
++}
++
+ QString TaskFilterModel::screenName() const
+ {
+     return m_output ? m_output->name() : QString();
+diff --git a/kwin/mobiletaskswitcher/plugin/taskfiltermodel.h b/kwin/mobiletaskswitcher/plugin/taskfiltermodel.h
+index 87244cc..ce3688a 100644
+--- a/kwin/mobiletaskswitcher/plugin/taskfiltermodel.h
++++ b/kwin/mobiletaskswitcher/plugin/taskfiltermodel.h
+@@ -30,6 +30,8 @@ public:
+     TaskModel *windowModel() const;
+     void setWindowModel(KWin::TaskModel *taskModel);
+ 
++    Q_INVOKABLE void refresh();
++
+     QString screenName() const;
+     void setScreenName(const QString &screenName);
+ 

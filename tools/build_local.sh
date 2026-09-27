@@ -148,6 +148,8 @@ docker run --rm --platform linux/amd64 \
         test -f "$d/usr/local/bin/bannerlator-proton-extra"
     '
 
+"${repo_root}/tools/plasma-mobile/build.sh"
+
 github_repo=${DROIDDECK_GITHUB_REPOSITORY:-}
 if [[ -z "${github_repo}" ]]; then
     origin_url=$(git -C "${repo_root}" remote get-url origin)

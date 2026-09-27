@@ -9,6 +9,8 @@ import java.nio.file.Files
 
 /** Installs the optional Plasma Mobile shell into its isolated Arch Linux ARM package root. */
 object PlasmaMobileInstaller {
+    private val packages = listOf("plasma-mobile", "plasma-settings", "angelfish")
+
     @Synchronized
     fun install(context: Context, listener: LinuxRuntimeInstaller.ProgressListener?): String? {
         if (!LinuxRuntime.isInstalled(context)) return "The Linux runtime is not installed"
@@ -45,7 +47,12 @@ object PlasmaMobileInstaller {
             // unowned files from its base image; the Steam root remains untouched.
             "/bin/sh", "-c",
             "/usr/bin/pacman-key --init && /usr/bin/pacman-key --populate archlinuxarm && " +
-                "exec /usr/bin/pacman -Syyu --needed --noconfirm --overwrite '*' plasma-mobile",
+                "/usr/bin/pacman -Syyu --needed --noconfirm --overwrite '*' ${packages.joinToString(" ")} && " +
+                // Keep Firefox and Discover out of the Plasma-only clone even if the base root
+                // already installed them; the original desktop root remains unchanged.
+                "for excluded in firefox discover; do " +
+                "if /usr/bin/pacman -Qq \"\$excluded\" >/dev/null 2>&1; then " +
+                "/usr/bin/pacman -Rns --noconfirm \"\$excluded\" || exit; fi; done",
         )
         val command = LinuxRuntime.commandForRoot(
             context, root, sessionRoot, runtimeDir, null, null, guest, true,
@@ -89,7 +96,7 @@ object PlasmaMobileInstaller {
                 return "pacman exited with status $status" + if (detail.isNotEmpty()) ": $detail" else ""
             }
             val packageMarker = DesktopCatalog.plasmaMobileMarker(context)
-            FileUtils.writeString(packageMarker, "archlinuxarm\n")
+            FileUtils.writeString(packageMarker, "${DesktopCatalog.PLASMA_MOBILE_PACKAGE_REVISION}\n")
             if (!packageMarker.isFile) return "Plasma Mobile packages installed, but DroidDeck could not save the installation marker"
             if (!DesktopCatalog.plasmaMobileInstalled(context)) {
                 packageMarker.delete()

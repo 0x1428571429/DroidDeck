@@ -81,6 +81,21 @@ dbus-run-session -- env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" plasma_log="$plasma_l
     else
       echo "== plasma-mobile-envmanager is missing"
     fi
+    # This guest has no interactive login from which the user can set a Linux password. The Plasma
+    # Mobile PIN keypad authenticates that account password, so an idle/lock event can strand a
+    # device user at a screen they cannot unlock. Keep session locking disabled for this embedded
+    # desktop and let Android own the device lock instead.
+    lock_config="${XDG_CONFIG_HOME:-$HOME/.config}/kscreenlockerrc"
+    mkdir -p "$(dirname "$lock_config")"
+    if command -v kwriteconfig6 >/dev/null 2>&1; then
+      kwriteconfig6 --file "$lock_config" --group Daemon --key Autolock false
+      kwriteconfig6 --file "$lock_config" --group Daemon --key LockOnResume false
+      kwriteconfig6 --file "$lock_config" --group Daemon --key RequirePassword false
+      kwriteconfig6 --file "$lock_config" --group Daemon --key Timeout 0
+      echo "== disabled Plasma screen locking in $lock_config"
+    else
+      echo "== kwriteconfig6 is missing; could not disable Plasma screen locking"
+    fi
     if command -v kbuildsycoca6 >/dev/null 2>&1; then
       echo "== building KDE service cache"
       QT_QPA_PLATFORM=offscreen kbuildsycoca6 --noincremental >>"$plasma_log" 2>&1
@@ -95,13 +110,28 @@ dbus-run-session -- env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" plasma_log="$plasma_l
     else
       echo "== kbuildsycoca6 is missing"
     fi
+    effect_config="${XDG_CONFIG_HOME:-$HOME/.config}/kwinrc"
+    if command -v kwriteconfig6 >/dev/null 2>&1; then
+      # The overview control in Plasma Mobile invokes this KWin effect. Keep it explicitly enabled
+      # so the patched state/gesture initialization is active in the embedded session.
+      kwriteconfig6 --file "$effect_config" --group Plugins --key mobiletaskswitcherEnabled true
+    fi
+    if command -v kreadconfig6 >/dev/null 2>&1; then
+      effect_setting=$(kreadconfig6 --file "$effect_config" \
+        --group Plugins --key mobiletaskswitcherEnabled 2>&1 || true)
+      echo "== mobile task-switcher setting in $effect_config: ${effect_setting:-unset}"
+    else
+      echo "== kreadconfig6 is missing; cannot inspect the mobile task-switcher setting"
+    fi
     echo "== starting nested KWin and Plasma Mobile on wayland-0 (${width}x${height}), socket wayland-1"
-    KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 QT_FORCE_STDERR_LOGGING=1 QT_LOGGING_RULES="kwin*.debug=true" kwin_wayland \
+    # The mobile task switcher queries Workspace::activities() while filtering tasks.
+    # Keep KActivities initialized; --no-kactivities makes the overview crash on activation.
+    KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 kwin_wayland \
       --xwayland \
       --wayland-display=wayland-0 \
       --socket=wayland-1 \
       --width="$width" --height="$height" --fullscreen \
-      --no-lockscreen --no-global-shortcuts --no-kactivities \
+      --no-lockscreen \
       --exit-with-session "plasmashell -p org.kde.plasma.mobileshell --replace" \
       >>"$plasma_log" 2>&1 &
     kwin_pid=$!

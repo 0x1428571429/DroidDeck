@@ -1,0 +1,60 @@
+diff --git a/containments/homescreens/folio/applicationlistmodel.cpp b/containments/homescreens/folio/applicationlistmodel.cpp
+--- a/containments/homescreens/folio/applicationlistmodel.cpp
++++ b/containments/homescreens/folio/applicationlistmodel.cpp
+@@ -35,9 +35,9 @@ ApplicationListModel::ApplicationListModel(HomeScreen *parent)
+ 
+     // initialize wayland window checking
+     KWayland::Client::ConnectionThread *connection = KWayland::Client::ConnectionThread::fromApplication(this);
+-    if (!connection) {
+-        return;
+-    }
+-
++    qDebug() << "Folio app model Wayland client connection:" << (connection != nullptr);
++    // Listing and launching desktop entries does not need a Wayland client connection. In an
++    // embedded compositor session KWayland may not expose its shared connection to this model;
++    // still populate the catalog so the drawer is usable.
+     load();
+ }
+@@ -93,6 +93,7 @@ void ApplicationListModel::load()
+     }
+ 
+     const KService::List currentApps = queryApplications();
++    qDebug() << "Folio application service query returned" << currentApps.size() << "entries";
+     QList<KService::Ptr> toInsert;
+ 
+     for (const KService::Ptr &service : currentApps) {
+diff --git a/containments/homescreens/folio/qml/AppDrawer.qml b/containments/homescreens/folio/qml/AppDrawer.qml
+index a389b20..5b1840a 100644
+--- a/containments/homescreens/folio/qml/AppDrawer.qml
++++ b/containments/homescreens/folio/qml/AppDrawer.qml
+@@ -87,7 +87,7 @@ Item {
+             anchors.left: parent.left
+             anchors.right: parent.right
+             anchors.bottom: parent.bottom
+-            opacity: 0 // we display with the opacity gradient below
++            opacity: 1 // Render app tiles directly with Qt's software Quick backend.
+             headerHeight: root.headerHeight
+ 
+             // Keyboard navigation
+@@ -104,10 +104,5 @@ Item {
+             }
+         }
+ 
+-        // Opacity gradient at grid edges
+-        MobileShell.FlickableOpacityGradient {
+-            anchors.fill: appDrawerGrid
+-            flickable: appDrawerGrid
+-        }
+     }
+ }
+diff --git a/containments/homescreens/folio/qml/AppDrawerGrid.qml b/containments/homescreens/folio/qml/AppDrawerGrid.qml
+--- a/containments/homescreens/folio/qml/AppDrawerGrid.qml
++++ b/containments/homescreens/folio/qml/AppDrawerGrid.qml
+@@ -29,6 +29,5 @@ MobileShell.GridView {
+ 
+     cacheBuffer: cellHeight * 20
+     reuseItems: true
+-    layer.enabled: true
+ 
+     keyNavigationEnabled: true
+     highlightMoveDuration: 0
