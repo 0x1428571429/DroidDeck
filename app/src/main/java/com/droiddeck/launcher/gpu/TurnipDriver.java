@@ -5,6 +5,7 @@ import android.net.Uri;
 import android.os.Environment;
 import android.util.Log;
 
+import com.droiddeck.launcher.core.DeviceSupport;
 import com.droiddeck.launcher.core.FileUtils;
 import com.droiddeck.launcher.core.TarZst;
 import com.droiddeck.launcher.session.SessionPrefs;
@@ -24,11 +25,11 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * The Vulkan driver the in-app compositor runs on. It has to be Turnip: the system Adreno driver
- * does not implement VK_EXT_image_drm_format_modifier, so importing the dma-bufs gamescope hands
- * over fails and the session renders nothing. Two builds ship in the apk, one per Adreno
- * generation, and the GPU decides which is unpacked - unless the user has imported an AdrenoTools
- * zip of their own and chosen it, which then wins.
+ * The Vulkan driver the in-app compositor runs on. On Adreno it needs Turnip: the system Adreno
+ * driver does not implement VK_EXT_image_drm_format_modifier, so importing the dma-bufs gamescope
+ * hands over fails and the session renders nothing. The bundled builds are Adreno-only; on other
+ * GPUs, use the system driver. The GPU decides which Turnip build is unpacked - unless the user
+ * has imported an AdrenoTools zip of their own and chosen it, which then wins.
  *
  * <p>The guest's own Turnip is a different copy entirely - a glibc build inside the rootfs, or an
  * imported one ({@link LinuxVulkanDriverManager}). This one is the bionic build the app process
@@ -39,8 +40,8 @@ import java.util.zip.ZipInputStream;
  * {@code meta.json} whose {@code libraryName} names the .so beside it - the AdrenoTools layout.
  * The import path is ported from Bannerlator's {@code AdrenotoolsManager} (GPL-3.0), including
  * the refusal of zips that belong in the Linux runtime list: a "-Linux" (glibc) Turnip names no
- * library on purpose, and installed here it would put the compositor on the system Vulkan - a
- * black screen wearing a driver's name.
+ * library on purpose, and installed here it would put the compositor on the system Vulkan while
+ * appearing to select a driver.
  */
 public final class TurnipDriver {
     private static final String TAG = "TurnipDriver";
@@ -267,8 +268,7 @@ public final class TurnipDriver {
 
     /**
      * Unpacks the driver this device needs and returns its id, or null to fall back to the system
-     * Vulkan loader (which means a black session on Adreno, but is better than refusing to start
-     * on a GPU neither build covers).
+     * Vulkan loader. The system driver must provide the compositor's Vulkan and dma-buf extensions.
      */
     public String install() {
         String id = choose();
@@ -321,6 +321,10 @@ public final class TurnipDriver {
             if (forced.startsWith("system")) return null;
             if (forced.startsWith("a8")) return DRIVER_A8XX;
             if (forced.startsWith("a7")) return DRIVER_A7XX;
+        }
+        if (!DeviceSupport.INSTANCE.adreno()) {
+            Log.i(TAG, "no bundled driver for this GPU; using system Vulkan");
+            return null;
         }
         String model = gpuModel();
         Log.i(TAG, "gpu model: " + (model == null ? "unknown" : model));

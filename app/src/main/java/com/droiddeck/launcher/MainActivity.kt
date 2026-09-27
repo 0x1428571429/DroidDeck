@@ -433,7 +433,7 @@ class MainActivity : ComponentActivity() {
                 showNonAdreno?.let { release ->
                     ConfirmDialog(
                         title = "Not an Adreno GPU",
-                        text = "Turnip supports Adreno GPUs. On ${com.droiddeck.launcher.core.DeviceSupport.gpuName()}, Steam may show a black screen. Download: ${"%.0f".format(release.size / 1e6)} MB.",
+                        text = "The Linux runtime's bundled Vulkan driver targets Adreno GPUs. On ${com.droiddeck.launcher.core.DeviceSupport.gpuName()}, Steam may show a black screen. Download: ${"%.0f".format(release.size / 1e6)} MB.",
                         confirm = "Install anyway",
                         onConfirm = { showNonAdreno = null; install(release) },
                         onDismiss = { showNonAdreno = null },
@@ -1113,14 +1113,14 @@ class MainActivity : ComponentActivity() {
             Thread({ checkCatalog() }, "catalog").start()
             return
         }
-        // The runtime draws with Turnip, an Adreno driver: on Mali, Xclipse or PowerVR the
-        // compositor gets no usable Vulkan device and a session is sound over a black screen.
-        // Said before the download, not after it; the user may still go ahead.
+        // The bundled Linux runtime Vulkan ICD is Freedreno, which targets Adreno. The Android
+        // compositor can use a non-Adreno system driver, but Steam may still have no guest Vulkan
+        // device. Warn before the download; the user may still go ahead.
         if (installed == null && !com.droiddeck.launcher.core.DeviceSupport.adreno()) { showNonAdreno = release; return }
         install(release)
     }
 
-    /** Starts a session; with no runtime on a non-Adreno, the same warning Setup gives comes first, before any download. */
+    /** Starts a session; with no runtime on a non-Adreno, show the guest Vulkan warning before download. */
     private fun startSession(intent: Intent, steamSession: Boolean = false) {
         refreshPhantomStatus()
         if (steamSession && PhantomProcessLimit.blocksSteam(phantomProcessStatus)) {

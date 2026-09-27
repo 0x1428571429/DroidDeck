@@ -156,8 +156,8 @@ public final class WaylandCompositor {
 
     /** Start the compositor rendering to {@code surface}. XDG_RUNTIME_DIR = an
      *  app-writable dir for the wayland socket (e.g. context.getFilesDir()).
-     *  driverPath/libraryName/nativeLibDir select the Turnip driver via adrenotools
-     *  (all null -> system libvulkan, which can't do dmabuf import). */
+     *  driverPath/libraryName/nativeLibDir select a bundled or imported driver via adrenotools
+     *  (all null -> system libvulkan; dma-buf import support depends on that device's driver). */
     public static native void nativeStartWithSurface(Surface surface, String xdgRuntimeDir,
                                                      String driverPath, String libraryName,
                                                      String nativeLibDir);

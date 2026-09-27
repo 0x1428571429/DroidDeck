@@ -4,13 +4,12 @@ import android.os.Build
 import java.io.File
 
 /**
- * Whether this device can draw a Linux session at all.
+ * Whether the bundled Linux runtime's Vulkan renderer is likely to work.
  *
- * The runtime draws with Turnip, an Adreno driver. On Mali, Xclipse and PowerVR the compositor
- * gets no usable Vulkan device and a session comes up as sound over a black screen - a failure
- * with nothing in it to read. The app cannot fix that, so it says so before the download rather
- * than after it. Adreno is recognised by what only Qualcomm's stack has: the KGSL node, or the
- * vendor's own Vulkan driver at its usual path.
+ * The runtime currently ships the Freedreno Vulkan ICD, which targets Adreno. The Android
+ * compositor uses a separate driver and can use a non-Adreno system Vulkan implementation. This
+ * check gates the guest-driver warning. Adreno is recognised by what only Qualcomm's stack has:
+ * the KGSL node, or the vendor's own Vulkan driver at its usual path.
  */
 object DeviceSupport {
     fun adreno(): Boolean =
