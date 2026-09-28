@@ -1,0 +1,81 @@
+#!/bin/bash
+# KDE Plasma as the desktop: KWin nested as a client of the app's compositor (its Wayland backend,
+# chosen because WAYLAND_DISPLAY names the app's socket), with Plasma's session on it and Xwayland
+# for the X11 programs. Started by droiddeck-desktop when the Desktop settings pick KDE Plasma and
+# the plasma package is in; what droiddeck-desktop prepares (the log, fonts, the menu's game and
+# emulator entries, controller defaults) is done by then. If KWin does not come up, the desktop
+# starts on LXQt instead and the log says why.
+# Staged by the app on every launch, like droiddeck-desktop.
+set -u
+export XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=KDE XDG_SESSION_DESKTOP=KDE
+export KDE_FULL_SESSION=true KDE_SESSION_VERSION=6
+# Plasma's own platform theme (plasma-integration), not LXQt's.
+unset QT_QPA_PLATFORMTHEME WLR_RENDERER WLR_BACKENDS
+export QT_QPA_PLATFORM="wayland;xcb"
+# KWin composites in software (QPainter): its OpenGL path allocates through gbm on a DRM render node,
+# which the KGSL stand-in is not - the same wall stock wlroots hit. QPainter hands programs shm
+# buffers only, so games and emulators from the menu open full screen on the GPU through
+# droiddeck-gpu, as on LXQt's pixman. BL_KWIN_COMPOSE (O2, Q) overrides for experiments.
+export KWIN_COMPOSE=${BL_KWIN_COMPOSE:-Q}
+echo "== droiddeck-plasma: KWin ($KWIN_COMPOSE) nested on $WAYLAND_DISPLAY at ${BL_WIDTH:-1280}x${BL_HEIGHT:-720}"
+
+# Settings Plasma reads at start, written every session: no splash, no systemd boot (there is no
+# systemd user instance in proot), no screen locker (it needs PAM and a greeter), no wallet
+# prompts, no file indexer eating the cores a game needs.
+kset() { kwriteconfig6 --file "$1" --group "$2" --key "$3" "$4" 2>/dev/null; }
+kset ksplashrc KSplash Engine none
+kset ksplashrc KSplash Theme None
+kset startkderc General systemdBoot false
+kset kscreenlockerrc Daemon Autolock false
+kset kscreenlockerrc Daemon LockOnResume false
+kset kwalletrc Wallet Enabled false
+kset baloofilerc "Basic Settings" "Indexing-Enabled" false
+# The nested output is the app's surface: no scaling, the app already sized it.
+kset kwinrc Xwayland Scale 1
+
+SOCKET=wayland-1
+rm -f "$XDG_RUNTIME_DIR/$SOCKET" "$XDG_RUNTIME_DIR/$SOCKET.lock"
+run_kwin() {
+  local args=(--socket "$SOCKET" --width "${BL_WIDTH:-1280}" --height "${BL_HEIGHT:-720}" --scale 1
+              --xwayland --no-lockscreen --exit-with-session /usr/local/bin/droiddeck-plasma-session)
+  # A session bus: kded, plasmashell and the portal all live on it.
+  if command -v dbus-run-session >/dev/null 2>&1; then
+    dbus-run-session -- kwin_wayland "${args[@]}"
+  else
+    kwin_wayland "${args[@]}"
+  fi
+}
+kwin_answers() { WAYLAND_DISPLAY=$SOCKET timeout 3 wayland-info >/dev/null 2>&1; }
+pids_named() {
+  local p
+  for p in /proc/[0-9]*; do
+    [ "$(cat "$p/comm" 2>/dev/null)" = "$1" ] && echo "${p#/proc/}"
+  done
+}
+fall_back() {
+  echo "== droiddeck-plasma: $1; starting LXQt instead"
+  for prog in plasmashell kded6 ksmserver kwin_wayland Xwayland; do kill -KILL $(pids_named "$prog") 2>/dev/null; done
+  find "$XDG_RUNTIME_DIR" -mindepth 1 -maxdepth 1 ! -name 'wayland-0*' ! -name 'keymap.xkb' -exec rm -rf {} + 2>/dev/null
+  BL_DESKTOP_SHELL=lxqt exec /usr/local/bin/droiddeck-desktop
+}
+
+started=$(date +%s)
+run_kwin &
+kwin_job=$!
+answered=
+while kill -0 "$kwin_job" 2>/dev/null; do
+  if kwin_answers; then answered=1; break; fi
+  [ $(( $(date +%s) - started )) -ge 30 ] && break
+  sleep 1
+done
+if [ -z "$answered" ]; then
+  if kill -0 "$kwin_job" 2>/dev/null; then
+    kill -TERM $(pids_named kwin_wayland) 2>/dev/null
+    sleep 2
+    fall_back "KWin did not answer in 30 s"
+  fi
+  wait "$kwin_job"
+  fall_back "KWin exited at start (exit $?)"
+fi
+echo "== droiddeck-plasma: KWin is up after $(( $(date +%s) - started )) s"
+wait "$kwin_job"

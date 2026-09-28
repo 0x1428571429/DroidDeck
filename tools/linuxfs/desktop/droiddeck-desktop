@@ -130,6 +130,17 @@ python3 /usr/local/bin/bannerlator-pad-defaults 2>&1 | sed 's/^/[pads] /'
 gpu_entries() { python3 /usr/local/bin/droiddeck-desktop-gpu 2>&1 | sed 's/^/[gpu] /'; }
 gpu_entries
 
+# KDE Plasma picked in the Desktop settings (BL_DESKTOP_SHELL): KWin takes labwc's place. It
+# composites in software, so the menu's entries go full screen on the GPU as they do on pixman.
+if [ "${BL_DESKTOP_SHELL:-lxqt}" = plasma ]; then
+  if [ -x /usr/bin/kwin_wayland ] && [ -x /usr/local/bin/droiddeck-plasma ]; then
+    use_renderer pixman
+    gpu_entries
+    exec /usr/local/bin/droiddeck-plasma
+  fi
+  echo "== droiddeck-desktop: KDE Plasma is not installed; starting LXQt"
+fi
+
 # ~/.droiddeck-desktop-debug: labwc's own debug log (views and layer surfaces mapping) too. The GPU
 # renderers are experimental and always log in full, so a desktop that does not come up says why.
 DEBUG=; { [ -f "$HOME/.droiddeck-desktop-debug" ] || [ "$WLR_RENDERER" != pixman ]; } && DEBUG=-d

@@ -1,0 +1,25 @@
+#!/bin/bash
+# What runs inside KWin for the Plasma desktop (droiddeck-plasma's --exit-with-session): the Steam
+# client if the desktop was asked for with Steam in it, then Plasma's own session. KWin, and with it
+# the desktop, ends when this does.
+# The desktop was asked for with Steam in it (the front end's "Steam Desktop UI", Big Picture's
+# "Switch to Desktop"): the client's desktop UI, as LXQt's autostart opens it.
+if [ "${BL_DESKTOP_STEAM:-0}" = 1 ]; then
+  /usr/local/bin/bannerlator-steam-launch desktop 2>&1 | sed 's/^/[steam] /' &
+fi
+# The desktop's wallpaper once, on the first Plasma start; after that it is the user's to change.
+if [ ! -f "$HOME/.config/.droiddeck-plasma-wallpaper" ] && [ -f /usr/share/backgrounds/steamdeck.png ]; then
+  ( set -o pipefail; sleep 8
+    plasma-apply-wallpaperimage /usr/share/backgrounds/steamdeck.png 2>&1 | sed 's/^/[wallpaper] /' \
+      && touch "$HOME/.config/.droiddeck-plasma-wallpaper" ) &
+fi
+for session in /usr/lib/startplasma-waylandsession /usr/libexec/startplasma-waylandsession; do
+  if [ -x "$session" ]; then
+    echo "== droiddeck-plasma: $session"
+    "$session" 2>&1 | sed 's/^/[plasma] /'
+    exit "${PIPESTATUS[0]}"
+  fi
+done
+echo "== droiddeck-plasma: no startplasma-waylandsession; plasmashell on its own"
+plasmashell 2>&1 | sed 's/^/[plasmashell] /'
+exit "${PIPESTATUS[0]}"
