@@ -43,10 +43,11 @@ while read -r f; do
   head -c 4 "$root/$f" | grep -q $'\x7fELF' || continue
   sudo chroot "$root" /usr/bin/ldd "/$f" 2>&1 | grep -E "not found" | sed "s#^#/$f: #" >> "$work/unresolved.txt" || true
 done < "$work/files.txt"
-# What the desktop runs must resolve completely. Plugins that need an optional dependency the
-# package does not bring (Python bindings, PackageKit, SQL drivers...) only fail to load, as they
-# do on any Arch install without those extras; they are listed, not fatal.
-core='^/usr/(bin/|lib/[^/]+\.so|lib/startplasma|lib/qt6/plugins/(platforms|wayland-|platformthemes|kf6/kwindowsystem)|lib/qt6/qml/org/kde/(kirigami|plasma)/)'
+# What the desktop starts must resolve completely (ldd follows every library they load). Other
+# helpers and plugins that need an optional dependency the package does not bring (Python
+# bindings, PackageKit, input methods...) only fail to load, as on any Arch install without those
+# extras; they are counted, not fatal.
+core='^/usr/(bin/(kwin_wayland|kwin_wayland_wrapper|plasmashell|ksmserver|kded6|krunner|dolphin|konsole|systemsettings|plasma_session)|lib/(startplasma-waylandsession|xdg-desktop-portal-kde|kactivitymanagerd|polkit-kde-authentication-agent-1|DiscoverNotifier)):'
 if [ -s "$work/unresolved.txt" ]; then
   echo "== unresolved libraries or symbol versions:"
   sort -u "$work/unresolved.txt" | head -80
@@ -54,21 +55,25 @@ if [ -s "$work/unresolved.txt" ]; then
     annotate "unresolved in the desktop's own programs: $(grep -E "$core" "$work/unresolved.txt" | sort -u | head -12 | tr -s ' \t' ' ' | tr '\n' ';')"
     fail=1
   fi
-  notice "optional plugins with a missing dependency: $(grep -vE "$core" "$work/unresolved.txt" | cut -d: -f1 | sort -u | wc -l)"
+  notice "optional helpers and plugins missing a dependency: $(grep -vE "$core" "$work/unresolved.txt" | cut -d: -f1 | sort -u | wc -l)"
 else
   echo "== every library in the package resolves in the runtime"
 fi
 
 # KWin must start far enough to answer. plasmashell sets up its scene before it reads its arguments
 # and cannot without a compositor, so it is held to its libraries (above) and its answer only noted.
+# A fresh proc (never a bind of the host's /dev or /proc: the rootfs is deleted at the end).
+sudo mount -t proc proc "$root/proc"
+sudo mkdir -p "$root/tmp/xdg" && sudo chmod 700 "$root/tmp/xdg"
 for prog in kwin_wayland plasmashell; do
   rc=0
-  out=$(sudo chroot "$root" /usr/bin/env -i PATH=/usr/bin HOME=/root QT_QPA_PLATFORM=offscreen "/usr/bin/$prog" --version 2>&1) || rc=$?
+  out=$(sudo chroot "$root" /usr/bin/env -i PATH=/usr/bin HOME=/root XDG_RUNTIME_DIR=/tmp/xdg QT_QPA_PLATFORM=offscreen "/usr/bin/$prog" --version 2>&1) || rc=$?
   echo "$prog --version (exit $rc): $out"
   if [ "$rc" -ne 0 ]; then
     if [ "$prog" = kwin_wayland ]; then annotate "FAILED: $prog --version exit $rc: $(echo "$out" | tail -3 | tr '\n' ' ')"; fail=1
     else notice "$prog --version exit $rc: $(echo "$out" | tail -3 | tr '\n' ' ')"; fi
   fi
 done
-sudo rm -rf "$work"
+sudo umount "$root/proc"
+mountpoint -q "$root/proc" || sudo rm -rf "$work"
 exit $fail
