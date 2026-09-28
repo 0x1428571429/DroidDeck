@@ -1,0 +1,61 @@
+name: Build KDE Plasma package
+
+# The Plasma shell package (tools/plasma): Arch Linux ARM's KWin and Plasma, closed over their
+# dependencies less what the runtime and the desktop package already carry, installed over both in
+# a smoke test on an arm64 runner, and published as a release asset that catalog/shells.json names.
+on:
+  push:
+    paths:
+      - 'tools/plasma/**'
+      - '.github/workflows/build-plasma.yml'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish as (e.g. plasma-r1); empty = artifact only'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: bash tools/plasma/build.sh out
+      - name: Smoke test over the runtime and the desktop
+        run: bash tools/plasma/smoke-test.sh out/plasma.tar.zst
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plasma
+          path: |
+            out/plasma.tar.zst
+            out/plasma.sha256
+            out/plasma.packages.txt
+      - name: Catalog entry
+        run: |
+          set -euo pipefail
+          tag=${{ inputs.tag || 'plasma-rN' }}
+          size=$(stat -c %s out/plasma.tar.zst)
+          sha=$(cat out/plasma.sha256)
+          {
+            echo "### catalog/shells.json entry"
+            echo '```json'
+            printf '{ "id": "plasma", "name": "KDE Plasma", "tier": 1, "version": "%s", "kind": "tar",\n' "${tag#plasma-}"
+            printf '  "url": "https://github.com/%s/releases/download/%s/plasma.tar.zst",\n' "$GITHUB_REPOSITORY" "$tag"
+            printf '  "sha256": "%s", "size": %s,\n' "$sha" "$size"
+            printf '  "notes": "KWin and plasmashell over the desktop package; Dolphin, Konsole, System Settings" }\n'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd out
+          gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --notes "KDE Plasma for the desktop: tools/plasma/seeds.txt over Arch Linux ARM, less the runtime's and the desktop package's own packages (Qt and KDE libraries shipped again). Extracts over the desktop package. sha256 $(cat plasma.sha256)" plasma.tar.zst plasma.sha256 plasma.packages.txt \
+            || gh release upload "${{ inputs.tag }}" plasma.tar.zst plasma.sha256 plasma.packages.txt --clobber

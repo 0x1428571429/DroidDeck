@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "category": "droiddeck-shells",
+  "note": "Desktop shells the app installs over the desktop package when one is chosen in the Desktop settings. Built by .github/workflows/build-plasma.yml, whose run summary prints the entry to paste here.",
+  "packages": []
+}
