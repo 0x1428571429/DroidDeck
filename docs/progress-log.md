@@ -7,6 +7,34 @@ the timeline, then lessons and backlog. Companion to the README (what the app *d
 
 ---
 
+## 2026-09-28 - Cemu's Turnip fix released for every driver; A8xx driver back; proven on the Galaxy Z Fold 8
+
+State: **DroidDeck main unchanged** (`d98c211`); this is driver-side work in `The412Banner/Banners-Turnip`,
+released as **`v26.3.0-20260928-r4`** (Latest; r3 is the same code - r4 was the Mesa watcher rebuilding because a
+hand-started release does not update `mesa_hash.txt`).
+
+- **The Cemu Vulkan crash is a Mesa bug, now fixed in every Banners-Turnip zip** (Android, Wayland, Linux):
+  `tu_knl_kgsl.cc` `kgsl_syncobj_merge` converted the wrong syncobj when a timestamp met a sync-file (NULL
+  dereference; in Mesa since the 2023 KGSL rewrite `9c808043f350`). Cemu waits on both kinds every frame. The fix
+  moved from `patches/linux/` to `patches/common/` (PR #2) - it is a KGSL bug, not a Linux one. Upstream Mesa MR:
+  dropped by the user (Mesa's contribution rules need it written and posted by the contributor).
+- **A8xx driver building again** (PR #3): it failed on all three legs since 09-27. whitebelyash's
+  "expose VK1.3 without multiview" is now Mesa's own behaviour (dropped), and Mesa's new `quirks` struct made
+  fuzz put `gmem_size` in the wrong struct (both hunks re-anchored).
+- **Linux zips carry the driconf defaults built in** (PR #4, `-Dxmlconfig=disabled`, from Max's WinNative
+  Drivers): before, they read `/usr/share/drirc.d` from the rootfs, so vkd3d/DXVK and per-game workarounds
+  (RDR2, DOOM Eternal, Spider-Man, ...) were whatever Mesa the rootfs ships. Verification now fails any zip
+  that reads drirc from disk.
+- **Adreno 840v2 chip id `0x44050A21`** (PR #1, felipGonzalez; POCO F9 Pro) and **Max's three A8XX hang fixes**
+  (PR #5: cube-map direction sanitize, bindless invalidate through the A8XX registers - re-targeted because
+  his mesh-shader patch is not carried - and a KGSL VBO alias for command streams), all A8XX-gated.
+- **Device proof - Samsung Galaxy Z Fold 8** (SM-F976U, SM8850, KGSL `Adreno840v2`, Android 17, DroidDeck
+  0.1.7, rootfs r9): r2 A8xx-Linux imported as the desktop driver ran Cemu Super Mario 3D World at ~36 fps on
+  Vulkan with sound, empty crash buffer; r3/r4 then "works, no issues" (user). The Fold's GPU matches Mesa's
+  existing A840 entry, so it did not need the 840v2 id.
+- **Backlog:** DroidDeck setup should install the newest Linux driver itself; hand-started Turnip releases
+  should update `mesa_hash.txt`; Max's mesh-shader/wave32 patches (DX12 Ultimate) not carried.
+
 ## 2026-09-25 - main `8cdedbe`: melonDS out of the box, touch in Big Picture, log privacy, Decky
 
 State: **main = `8cdedbe`** (PR #22 merge). Device-tested on the AYANEO Pocket FIT (repacked test builds)
