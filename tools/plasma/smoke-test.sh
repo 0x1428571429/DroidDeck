@@ -6,6 +6,9 @@
 #
 #   tools/plasma/smoke-test.sh <plasma.tar.zst>
 set -euo pipefail
+# On Actions, failures also go out as annotations, which can be read back without the log.
+annotate() { [ -n "${GITHUB_ACTIONS:-}" ] && echo "::error title=plasma smoke test::$*"; echo "$*"; }
+trap 'annotate "stopped at line $LINENO: $BASH_COMMAND"' ERR
 pkg=$(realpath "${1:?plasma.tar.zst}")
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/release.env"
@@ -26,7 +29,7 @@ rm -f "$work/runtime.tar.zst" "$work/desktop.tar.zst"
 
 fail=0
 for bin in usr/bin/kwin_wayland usr/bin/plasmashell usr/bin/dolphin usr/bin/konsole usr/bin/systemsettings; do
-  [ -e "$root/$bin" ] || { echo "MISSING /$bin"; fail=1; }
+  [ -e "$root/$bin" ] || { annotate "MISSING /$bin"; fail=1; }
 done
 ls "$root"/usr/lib/startplasma-waylandsession "$root"/usr/lib*/libexec/startplasma-waylandsession 2>/dev/null \
   || echo "note: no startplasma-waylandsession; the launcher starts plasmashell itself"
@@ -42,14 +45,17 @@ done < "$work/files.txt"
 if [ -s "$work/unresolved.txt" ]; then
   echo "== unresolved libraries or symbol versions:"
   sort -u "$work/unresolved.txt" | head -80
+  annotate "unresolved: $(sed 's#^.*: *##' "$work/unresolved.txt" | sort | uniq -c | sort -rn | head -12 | tr -s ' ' | tr '\n' ';')"
   fail=1
 else
   echo "== every library in the package resolves in the runtime"
 fi
 
 for prog in kwin_wayland plasmashell; do
-  if sudo chroot "$root" /usr/bin/env -i PATH=/usr/bin HOME=/root QT_QPA_PLATFORM=offscreen "/usr/bin/$prog" --version; then :; else
-    echo "FAILED: $prog --version"; fail=1
+  if out=$(sudo chroot "$root" /usr/bin/env -i PATH=/usr/bin HOME=/root QT_QPA_PLATFORM=offscreen "/usr/bin/$prog" --version 2>&1); then
+    echo "$out"
+  else
+    annotate "FAILED: $prog --version: $(echo "$out" | tail -3 | tr '\n' ' ')"; fail=1
   fi
 done
 sudo rm -rf "$work"
