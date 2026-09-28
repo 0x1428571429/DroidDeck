@@ -1,0 +1,15 @@
+# KDE Plasma as a second desktop shell: KWin nested as a client of the app's compositor, with
+# plasmashell's panel and desktop on it. Installed over the desktop package (LXQt), which keeps
+# Xwayland, Firefox, mpv and the launchers; this only adds the shell and its everyday apps.
+# One package name per line; the closure over Arch Linux ARM is taken at build time.
+kwin
+plasma-workspace
+plasma-desktop
+plasma-pa
+breeze
+breeze-icons
+kde-cli-tools
+xdg-desktop-portal-kde
+systemsettings
+dolphin
+konsole
