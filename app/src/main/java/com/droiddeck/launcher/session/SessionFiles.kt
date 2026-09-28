@@ -65,6 +65,10 @@ object SessionFiles {
             // Games and emulators from the menu, full screen in a gamescope of their own.
             "usr/local/bin/droiddeck-gpu" to "usr/local/bin/droiddeck-gpu",
             "usr/local/bin/droiddeck-desktop-gpu" to "usr/local/bin/droiddeck-desktop-gpu",
+            // KDE Plasma's launcher and the session it runs in KWin; used only when the plasma
+            // package is in and the Desktop settings pick it (droiddeck-desktop checks both).
+            "usr/local/bin/droiddeck-plasma" to "usr/local/bin/droiddeck-plasma",
+            "usr/local/bin/droiddeck-plasma-session" to "usr/local/bin/droiddeck-plasma-session",
             "etc/xdg/labwc/autostart" to "etc/xdg/labwc/autostart",
             "etc/xdg/labwc/rc.xml" to "etc/xdg/labwc/rc.xml",
             "etc/xdg/lxqt/panel.conf" to "etc/xdg/lxqt/panel.conf",

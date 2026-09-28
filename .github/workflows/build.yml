@@ -213,6 +213,8 @@ jobs:
           install -Dm644 tools/linuxfs/desktop/droiddeck-desktop "$D/usr/local/bin/droiddeck-desktop"
           install -Dm644 tools/linuxfs/desktop/droiddeck-gpu "$D/usr/local/bin/droiddeck-gpu"
           install -Dm644 tools/linuxfs/desktop/droiddeck-desktop-gpu "$D/usr/local/bin/droiddeck-desktop-gpu"
+          install -Dm644 tools/linuxfs/desktop/droiddeck-plasma "$D/usr/local/bin/droiddeck-plasma"
+          install -Dm644 tools/linuxfs/desktop/droiddeck-plasma-session "$D/usr/local/bin/droiddeck-plasma-session"
           install -Dm644 tools/linuxfs/desktop/autostart "$D/etc/xdg/labwc/autostart"
           install -Dm644 tools/linuxfs/desktop/rc.xml "$D/etc/xdg/labwc/rc.xml"
           install -Dm644 tools/linuxfs/desktop/panel.conf "$D/etc/xdg/lxqt/panel.conf"

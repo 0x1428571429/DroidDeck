@@ -116,6 +116,8 @@ docker run --rm --platform linux/amd64 \
         install -Dm644 tools/linuxfs/desktop/droiddeck-desktop "$d/usr/local/bin/droiddeck-desktop"
         install -Dm644 tools/linuxfs/desktop/droiddeck-gpu "$d/usr/local/bin/droiddeck-gpu"
         install -Dm644 tools/linuxfs/desktop/droiddeck-desktop-gpu "$d/usr/local/bin/droiddeck-desktop-gpu"
+        install -Dm644 tools/linuxfs/desktop/droiddeck-plasma "$d/usr/local/bin/droiddeck-plasma"
+        install -Dm644 tools/linuxfs/desktop/droiddeck-plasma-session "$d/usr/local/bin/droiddeck-plasma-session"
         install -Dm644 tools/linuxfs/desktop/autostart "$d/etc/xdg/labwc/autostart"
         install -Dm644 tools/linuxfs/desktop/rc.xml "$d/etc/xdg/labwc/rc.xml"
         install -Dm644 tools/linuxfs/desktop/panel.conf "$d/etc/xdg/lxqt/panel.conf"
