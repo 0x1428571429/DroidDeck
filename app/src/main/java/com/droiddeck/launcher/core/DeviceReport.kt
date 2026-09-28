@@ -52,7 +52,7 @@ object DeviceReport {
         b.append("DroidDeck session report\n")
         b.append("========================\n")
         k("Written", SimpleDateFormat("yyyy-MM-dd HH:mm:ss zzz", Locale.US).format(Date()))
-        k("Session mode", when (mode) { SessionService.MODE_DESKTOP -> "desktop (labwc/LXQt)"; SessionService.MODE_RUN -> "a program under gamescope"; else -> "Steam client (gamescope)" })
+        k("Session mode", when (mode) { SessionService.MODE_DESKTOP -> if (SessionPrefs.desktopShell(context) == SessionPrefs.SHELL_PLASMA) "desktop (KWin/KDE Plasma)" else "desktop (labwc/LXQt)"; SessionService.MODE_RUN -> "a program under gamescope"; else -> "Steam client (gamescope)" })
 
         h("App")
         runCatching {
@@ -133,6 +133,7 @@ object DeviceReport {
         k("Installed version", LinuxRuntimeInstaller.installedVersion(context))
         k("Runtime ready", LinuxRuntime.isInstalled(context))
         k("Desktop installed", DesktopCatalog.desktopInstalled(context))
+        k("KDE Plasma installed", DesktopCatalog.plasmaInstalled(context))
         k("Runtime root", LinuxRuntime.rootDir(context).path)
 
         h("Settings in effect")
