@@ -302,6 +302,8 @@ class SessionService : Service() {
             val override = File(Environment.getExternalStorageDirectory(), "Download/droiddeck-wlr-renderer")
                 .takeIf { it.isFile }?.let { FileUtils.readString(it)?.trim() }
             guest.add("BL_WLR_RENDERER=" + (override?.takeIf { it.isNotEmpty() } ?: SessionPrefs.desktopRenderer(this)))
+            // LXQt on labwc or KDE Plasma on KWin; droiddeck-desktop falls back to LXQt without Plasma.
+            guest.add("BL_DESKTOP_SHELL=" + SessionPrefs.desktopShell(this))
         }
         // The user's own games, for the runtime's shortcuts writer to put in the client's library
         // before the client starts (see frontend/AddedGames and bannerlator-steam-shortcuts).

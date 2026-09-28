@@ -241,7 +241,10 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                 !com.droiddeck.launcher.runtime.DesktopCatalog.desktopInstalled(this)
             val needProton = (intent.getStringExtra(SessionService.EXTRA_MODE) ?: SessionService.MODE_STEAM) == SessionService.MODE_STEAM &&
                 com.droiddeck.launcher.runtime.DesktopCatalog.protonSeedNeeded(this)
-            if (needRuntime || needDesktop || needProton) installThenStart(needRuntime, needDesktop, needProton)
+            val needPlasma = intent.getStringExtra(SessionService.EXTRA_MODE) == SessionService.MODE_DESKTOP &&
+                SessionPrefs.desktopShell(this) == SessionPrefs.SHELL_PLASMA &&
+                !com.droiddeck.launcher.runtime.DesktopCatalog.plasmaInstalled(this)
+            if (needRuntime || needDesktop || needProton || needPlasma) installThenStart(needRuntime, needDesktop, needProton, needPlasma)
         }
         hud = PerfHud(this)
         hud.onPresentingWindowChanged = {
@@ -562,16 +565,16 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
      * dialog, download or client restart. Not being able to fetch it stops nothing: the session
      * then asks the client for it after sign-in, as it always has.
      */
-    private fun installThenStart(runtime: Boolean, desktop: Boolean, proton: Boolean = false) {
+    private fun installThenStart(runtime: Boolean, desktop: Boolean, proton: Boolean = false, plasma: Boolean = false) {
         if (SessionState.stopRequested) return
         installingRuntime = true
-        SessionState.installing = if (runtime) "runtime" else if (desktop) "desktop" else "proton"
+        SessionState.installing = if (runtime) "runtime" else if (desktop || plasma) "desktop" else "proton"
         SessionEvents.transition(
             SessionPhase.INSTALLING_RUNTIME,
             "${SessionState.installing}.installing",
             mapOf("component" to SessionState.installing),
         )
-        loading.step = if (runtime) "downloading the Linux runtime" else if (desktop) "downloading the desktop"
+        loading.step = if (runtime) "downloading the Linux runtime" else if (desktop || plasma) "downloading the desktop"
                        else "downloading Proton Experimental (ARM64)"
         loading.percent = -1
         Thread({
@@ -586,6 +589,14 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                 SessionEvents.transition(SessionPhase.INSTALLING_RUNTIME, "desktop.installing", mapOf("component" to "desktop"))
                 problem = installDesktop()
                 if (problem == null) SessionEvents.record("desktop.ready") else failedComponent = "desktop"
+            }
+            // KDE Plasma over the desktop. Not having it stops nothing: the desktop starts on LXQt.
+            if (problem == null && plasma && !SessionState.stopRequested) {
+                SessionState.installing = "desktop"
+                SessionEvents.transition(SessionPhase.INSTALLING_RUNTIME, "plasma.installing", mapOf("component" to "plasma"))
+                val plasmaProblem = installPlasma()
+                if (plasmaProblem == null) SessionEvents.record("plasma.ready")
+                else SessionEvents.record("plasma.skipped", mapOf("reason" to plasmaProblem))
             }
             if (problem == null && proton && !SessionState.stopRequested) {
                 SessionState.installing = "proton"
@@ -658,6 +669,15 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         val problem = com.droiddeck.launcher.runtime.DesktopCatalog.install(this, entry,
             progressFor("the desktop", entry.size / 1_000_000))
         return problem?.let { "The desktop did not install ($it). Check the connection and press Desktop again." }
+    }
+
+    /** Null when KDE Plasma is in, else why not; the desktop then starts on LXQt. */
+    private fun installPlasma(): String? {
+        uiHandler.post { loading.percent = -1; loading.step = "downloading the desktop (KDE Plasma)" }
+        val catalog = com.droiddeck.launcher.runtime.DesktopCatalog
+        val entry = (catalog.fetch(catalog.SHELLS_URL) ?: return "catalog unreachable")
+            .firstOrNull { it.id == catalog.PLASMA_ID } ?: return "not published yet"
+        return catalog.install(this, entry, progressFor("the desktop (KDE Plasma)", entry.size / 1_000_000))
     }
 
     /** Null when the ARM64 Proton is in, else why not; the session goes on either way. */
