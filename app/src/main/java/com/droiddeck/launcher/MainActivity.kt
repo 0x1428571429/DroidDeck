@@ -190,6 +190,7 @@ class MainActivity : ComponentActivity() {
     private var oscMode by mutableStateOf(SessionPrefs.OSC_AUTO)
     private var backActionsInverted by mutableStateOf(false)
     private var renderer by mutableStateOf("vulkan")
+    private var desktopShell by mutableStateOf(SessionPrefs.SHELL_LXQT)
     private var gameStorage by mutableStateOf("")
     private var storageOptions by mutableStateOf<List<Pair<String, String>>>(emptyList())
     private val pickGameStorage = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
@@ -779,6 +780,7 @@ class MainActivity : ComponentActivity() {
                 forceFullscreen = if (mode == SessionService.MODE_STEAM) forceFullscreen else null,
                 mic = if (mode == SessionService.MODE_STEAM) mic else null,
                 renderer = if (mode == SessionService.MODE_DESKTOP) renderer else null,
+                shell = if (mode == SessionService.MODE_DESKTOP) desktopShell else null,
                 gameStorage = if (mode == SessionService.MODE_STEAM) gameStorage else null,
                 storageOptions = storageOptions,
                 fexPreset = if (mode == SessionService.MODE_STEAM) fexPreset else null,
@@ -828,6 +830,7 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onRenderer = { r -> SessionPrefs.setDesktopRenderer(this, r); renderer = r },
+                onShell = { shell -> SessionPrefs.setDesktopShell(this, shell); desktopShell = shell },
                 onGameStorage = { path, label -> setGameStorage(path, label) },
                 onPickGameStorageFolder = {
                     pickGameStorage.launch(InAppFilePicker.buildDirIntent(this, "Choose the game storage folder", gameStorage.ifEmpty { null }))
@@ -932,6 +935,7 @@ class MainActivity : ComponentActivity() {
         forceFullscreen = SessionPrefs.forceFullscreen(this)
         mic = SessionPrefs.micEnabled(this)
         renderer = SessionPrefs.desktopRenderer(this)
+        desktopShell = SessionPrefs.desktopShell(this)
         gameStorage = SessionPrefs.gameStorage(this)
         storageOptions = GameStorage.options(this).map { it.label to it.path }
         if (mode == SessionService.MODE_STEAM) {

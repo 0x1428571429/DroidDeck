@@ -61,6 +61,8 @@ class ModeSettings(
     val clientDirectAudio: Boolean = false,
     val mic: Boolean?,
     val renderer: String?,
+    /** Desktop only: SessionPrefs.SHELL_LXQT or SHELL_PLASMA. */
+    val shell: String? = null,
     val gameStorage: String? = null,
     val storageOptions: List<Pair<String, String>> = emptyList(),
     val fexPreset: String? = null,
@@ -118,6 +120,7 @@ class ModeSettingsActions(
     val onClientDirectAudio: (Boolean) -> Unit = {},
     val onMic: (Boolean) -> Unit,
     val onRenderer: (String) -> Unit,
+    val onShell: (String) -> Unit = {},
     val onGameStorage: (path: String, label: String) -> Unit = { _, _ -> },
     val onPickGameStorageFolder: () -> Unit = {},
     val onFexPreset: (String) -> Unit = {},
@@ -423,7 +426,17 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 }
             }
         }
-        if (!steam && s.renderer != null) SettingsGroup("Renderer") {
+        if (!steam && s.shell != null) SettingsGroup("Shell") {
+            ChoiceRow(
+                host, "shell", "Desktop shell", "Applies at the next start.",
+                listOf(SessionPrefs.SHELL_LXQT to "LXQt", SessionPrefs.SHELL_PLASMA to "KDE Plasma"), s.shell,
+                note = "KDE Plasma downloads the first time it starts and composites in software, so games " +
+                    "and emulators from its menu open full screen on the GPU. If it cannot start, the desktop comes up on LXQt.",
+                onPick = a.onShell,
+            )
+        }
+        // labwc's renderer; KDE Plasma's KWin always composites in software here.
+        if (!steam && s.renderer != null && s.shell != SessionPrefs.SHELL_PLASMA) SettingsGroup("Renderer") {
             ChoiceRow(
                 host, "renderer", "Desktop renderer", "Composites the desktop.",
                 listOf("vulkan" to "vulkan - GPU", "gles2" to "gles2 - GPU (experimental)", "pixman" to "pixman - software"), s.renderer,
