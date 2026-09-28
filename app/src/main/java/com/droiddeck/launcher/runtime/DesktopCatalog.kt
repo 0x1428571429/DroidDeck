@@ -25,6 +25,12 @@ object DesktopCatalog {
      */
     const val STEAM_SEED_URL = "https://raw.githubusercontent.com/The412Banner/winlator-contents/main/steam-seed.json"
     const val PROTON_SEED_ID = "proton-arm64"
+    /**
+     * Desktop shells other than LXQt, built in this repo (tools/plasma, build-plasma.yml) and
+     * installed over the desktop package when one is chosen in the Desktop settings.
+     */
+    const val SHELLS_URL = "https://raw.githubusercontent.com/Droid-Deck/DroidDeck/main/catalog/shells.json"
+    const val PLASMA_ID = "plasma"
 
     class Entry(
         val id: String, val name: String, val tier: Int, val version: String, val kind: String,
@@ -77,6 +83,10 @@ object DesktopCatalog {
     // every session, so it cannot tell whether the package is there); SessionFiles uses the same test.
     fun desktopInstalled(context: Context): Boolean =
         File(LinuxRuntime.rootDir(context), "usr/bin/labwc").isFile
+
+    /** KDE Plasma's package is in (droiddeck-desktop tests the same file). */
+    fun plasmaInstalled(context: Context): Boolean =
+        File(LinuxRuntime.rootDir(context), "usr/bin/kwin_wayland").isFile
 
     /** Downloads, verifies and installs one package. Returns null on success, else a message. */
     fun install(context: Context, entry: Entry, listener: LinuxRuntimeInstaller.ProgressListener?): String? {

@@ -420,6 +420,20 @@ object SessionPrefs {
     }
 
     /**
+     * The desktop's shell: SHELL_LXQT (labwc, the desktop package) or SHELL_PLASMA (KWin, the plasma
+     * package over it, fetched at the next Desktop start when it is not in yet).
+     */
+    fun desktopShell(context: Context): String =
+        prefs(context).getString("desktopShell", SHELL_LXQT)?.takeIf { it == SHELL_PLASMA } ?: SHELL_LXQT
+
+    fun setDesktopShell(context: Context, shell: String) {
+        prefs(context).edit().putString("desktopShell", shell).apply()
+    }
+
+    const val SHELL_LXQT = "lxqt"
+    const val SHELL_PLASMA = "plasma"
+
+    /**
      * HDR10 output for MODE_STEAM / MODE_DESKTOP. Off by default. Honoured only when the panel
      * lists HDR10 (HdrSupport), and decided when the compositor starts, which is once per app
      * process: a change applies after the app is fully closed and opened again.
