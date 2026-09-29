@@ -118,7 +118,12 @@ of these settings touch.
    is sync-heavy and is the best test of the kompat fix.
 4. **gamescope** calls `XQueryPointer` on every vblank in the Steam UI (patch `0100`); query only when a
    gamepad cursor move is pending. Needs a new pinned gamescope release.
-5. **Reports not yet reproduced:** software rendering on Adreno 8xx ("all renders on CPU"), Deck mode using
+5. **Heavy games on a fresh install.** Metal Gear Solid V: Ground Zeroes sat on Steam's launch splash for 5+ minutes
+   with wineserver at ~50% CPU and the GPU at 12% (no window ever appeared); Bulletstorm took ~4.5 minutes to reach
+   its first logo, the game process at 45-105% CPU and the GPU at 9%, and the session ended a minute later. Neither
+   reached a scene worth measuring. Both are first launches (redistributable install scripts, shader work), and a
+   wineserver spinning at 50% while a game shows nothing is itself the server-side synchronisation cost of lead 1.
+6. **Reports not yet reproduced:** software rendering on Adreno 8xx ("all renders on CPU"), Deck mode using
    most of the RAM, Samsung SSRM clamping (#64), two DroidDeck packages both holding a session.
-6. **Smaller:** proot tracer pinned to a big core (Max's note: no core wake-up lag), `steamrtarm64` on Proton's
+7. **Smaller:** proot tracer pinned to a big core (Max's note: no core wake-up lag), `steamrtarm64` on Proton's
    `LD_LIBRARY_PATH`, the always-on wake and Wi-Fi locks, ADPF hints fed frame intervals instead of work time.
