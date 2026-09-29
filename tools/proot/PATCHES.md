@@ -51,7 +51,17 @@ Added for Flatpak:
   answer `ENOSYS`. They take paths proot never translated, so libglnx's `open_tree(AT_FDCWD, "/")`
   handed Flatpak a descriptor for the host's root and it tried to create directories there
   (`mkdirat(root): Operation not permitted`); unsupported, libglnx falls back to `openat`.
-- `0011-android-hardlink-denial.patch` - Android's SELinux policy denies apps hard links, so
+- `0012-android-hardlink-denial.patch` - Android's SELinux policy denies apps hard links, so
   `linkat` fails with `EACCES` and Flatpak could not create its repo (`Creating repo: linkat:
   Permission denied`). `O_TMPFILE` answers `EOPNOTSUPP`, so libglnx writes a named temporary file
   and renames it, and a denied link answers `EPERM`, on which ostree's checkout copies instead.
+Added by DroidDeck:
+
+- `0011-kompat-utsname-only.patch` - `--kernel-release` (the guest's `DroidDeck` hostname) loads
+  kompat, whose filter traps `futex`, `fcntl`, `epoll_pwait`, `pselect6`, `pipe2`, `eventfd2`,
+  `socket` and more, and which strips `AT_SYSINFO_EHDR` on every `execve`, so glibc runs without
+  the vDSO. When the virtual release is not older than the real kernel and the hwcap is left
+  alone, every one of those handlers is a no-op: kompat now traces only `uname`, `sethostname`
+  and `setdomainname` and leaves the auxv as the kernel wrote it. On an SD 8 Gen 2 guest this
+  took a futex ping-pong from 467 to 97 us, `epoll_pwait` from 60 to 0.8 us and `fcntl` from
+  40-107 to 0.4 us, and `clock_gettime` back to the vDSO.
