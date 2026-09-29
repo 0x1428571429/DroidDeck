@@ -19,6 +19,24 @@ fail() { echo "== FAIL $*"; exit 1; }
 # between an app and the session bus. bubblewrap is not among them: Android gives an app no user
 # namespaces, and bannerlator-bwrap stands in for it (FLATPAK_BWRAP).
 PACKAGES="flatpak ostree appstream libxmlb libmalcontent libfyaml accountsservice composefs xdg-dbus-proxy"
+# Libraries Flatpak and the store's helper also need, which the Desktop package brings but a
+# runtime without it may lack: each is fetched only when its file is not already there.
+while read -r pkg probe; do
+  [ -n "$pkg" ] || continue
+  compgen -G "$probe" >/dev/null || PACKAGES="$PACKAGES $pkg"
+done <<'NEEDS'
+json-glib /usr/lib/libjson-glib-1.0.so.0
+fuse3 /usr/lib/libfuse3.so.4
+fuse-common /etc/fuse.conf
+libsodium /usr/lib/libsodium.so.*
+libstemmer /usr/lib/libstemmer.so.*
+polkit /usr/lib/libpolkit-gobject-1.so.0
+mpdecimal /usr/lib/libmpdec.so.*
+python /usr/bin/python3
+libgirepository /usr/lib/libgirepository-2.0.so.0
+gobject-introspection-runtime /usr/lib/girepository-1.0/GObject-2.0.typelib
+python-gobject /usr/lib/python3*/site-packages/gi/__init__.py
+NEEDS
 WORK=/var/cache/droiddeck-flatpak
 CONF=$WORK/pacman.conf
 mkdir -p "$WORK/pkg" "$WORK/db" || fail "cannot create $WORK"
@@ -75,6 +93,8 @@ missing=$(for f in /usr/bin/flatpak /usr/lib/libflatpak.so.0 /usr/lib/libostree-
 done | sort -u)
 [ -z "$missing" ] || { echo "$missing"; fail "Flatpak is missing libraries"; }
 flatpak --version >/dev/null 2>&1 || fail "flatpak does not start"
+python3 -c 'import gi; gi.require_version("Flatpak", "1.0"); from gi.repository import Flatpak' 2>/dev/null \
+  || fail "the store helper cannot load libflatpak from Python"
 
 step "Adding Flathub"
 export FLATPAK_BWRAP=/usr/local/bin/bannerlator-bwrap

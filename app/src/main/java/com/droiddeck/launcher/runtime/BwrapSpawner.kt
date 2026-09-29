@@ -308,7 +308,12 @@ object BwrapSpawner {
         val text = File("/proc/cpuinfo").readLines()
             .filterNot { it.startsWith("CPU implementer") || it.startsWith("CPU part") || it.startsWith("CPU variant") || it.startsWith("CPU revision") }
             .joinToString("\n", postfix = "\n")
-        if (!out.isFile || out.readText() != text) out.writeText(text)
+        // Sandboxes start side by side; one must never read another's half-written copy.
+        if (!out.isFile || out.readText() != text) {
+            val staged = File.createTempFile("cpuinfo", null, context.cacheDir)
+            staged.writeText(text)
+            if (!staged.renameTo(out)) staged.delete()
+        }
         out
     } catch (e: Exception) {
         Log.w(TAG, "cpuinfo", e); null
