@@ -57,6 +57,12 @@ object PhantomProcessLimit {
         null
     }
 
+    /**
+     * Developer options gained "Disable child process restrictions" in Android 14. On 12 and 13
+     * (the AYN Odin 2 and Thor, the Retroid Pocket 5) the flag exists but only ADB can set it.
+     */
+    fun hasDeveloperToggle(sdk: Int = Build.VERSION.SDK_INT): Boolean = sdk >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+
     fun blocksSteam(status: PhantomProcessStatus): Boolean =
         status != PhantomProcessStatus.NOT_APPLICABLE && status != PhantomProcessStatus.DISABLED
 

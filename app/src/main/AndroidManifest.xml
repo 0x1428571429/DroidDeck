@@ -130,6 +130,11 @@
         <service
             android:name=".runtime.RuntimeInstallService"
             android:exported="false" />
+        <!-- Waits for Settings' Wireless debugging pairing pop-up and takes its code as a
+             notification reply, so the child-process setting can be changed without a computer. -->
+        <service
+            android:name=".core.WirelessAdbPairingService"
+            android:exported="false" />
         <!-- Hands a zipped session folder to the share sheet; nothing else is exposed. -->
         <provider
             android:name="androidx.core.content.FileProvider"
