@@ -44,3 +44,10 @@ Ported from WinNative (`main`, 53836ca9, "Fix/performance and vac"):
 - `0009-tracee-relatives-sweep.patch` - tracees count their children, so a terminating thread
   with no children or ptracees no longer walks every tracee; the per-stop memory collector is
   emptied instead of freed and reallocated.
+
+Added for Flatpak:
+
+- `0010-new-mount-api-enosys.patch` - `open_tree`, `move_mount`, `fspick` and `mount_setattr`
+  answer `ENOSYS`. They take paths proot never translated, so libglnx's `open_tree(AT_FDCWD, "/")`
+  handed Flatpak a descriptor for the host's root and it tried to create directories there
+  (`mkdirat(root): Operation not permitted`); unsupported, libglnx falls back to `openat`.

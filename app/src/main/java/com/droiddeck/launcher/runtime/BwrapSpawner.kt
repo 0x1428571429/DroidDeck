@@ -196,7 +196,7 @@ object BwrapSpawner {
                     val link = writable(dest)
                     if (link != null) {
                         link.parentFile?.mkdirs()
-                        if (!Files.isSymbolicLink(link.toPath()) && !link.exists()) Os.symlink(target, link.path)
+                        if (!Files.isSymbolicLink(link.toPath()) && !link.exists()) Files.createSymbolicLink(link.toPath(), java.nio.file.Paths.get(target))
                     } else {
                         // A link inside the runtime's own tree cannot be made; what it points at is
                         // bound in its place.

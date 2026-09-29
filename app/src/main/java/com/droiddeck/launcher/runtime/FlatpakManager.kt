@@ -164,13 +164,15 @@ object FlatpakManager {
         if (!ready(context)) return "Set up Flatpak first"
         return exclusive("$verb:${id ?: "all"}") {
             var error: String? = null
+            // Progress lines carry no ref; they belong to the step the last "op" line started.
+            var step = "Starting"
             val argv = listOfNotNull("/usr/bin/python3", HELPER, verb, id)
             val status = runGuest(context, argv, fakeRoot = false) { line ->
                 val o = runCatching { JSONObject(line) }.getOrNull()
                 if (o == null) { Log.i(TAG, "$verb: $line"); return@runGuest }
                 when (o.optString("e")) {
-                    "op" -> onProgress(stage(o), overall(o, 0))
-                    "progress" -> onProgress(stage(o), overall(o, o.optInt("percent")))
+                    "op" -> { step = stage(o); onProgress(step, overall(o, 0)) }
+                    "progress" -> onProgress(step, overall(o, o.optInt("percent")))
                     "error" -> { error = o.optString("message"); Log.w(TAG, "$verb $id: $error") }
                     "warning" -> Log.w(TAG, "$verb $id: ${o.optString("message")}")
                 }
@@ -181,13 +183,31 @@ object FlatpakManager {
 
     private fun stage(o: JSONObject): String {
         val ref = o.optString("ref")
-        val name = ref.split('/').getOrNull(1)?.substringAfterLast('.') ?: ""
+        val name = refLabel(ref)
         val step = if (o.optInt("n") > 1) " (${o.optInt("i")}/${o.optInt("n")})" else ""
         return when (o.optString("kind")) {
             "uninstall" -> "Removing $name$step"
             "update" -> "Updating $name$step"
             else -> "Installing $name$step"
         }.let { if (ref.isEmpty()) o.optString("status").ifEmpty { "Working" } else it }
+    }
+
+    /** A ref in words: "app/org.supertuxproject.SuperTux/aarch64/stable" is "SuperTux". */
+    internal fun refLabel(ref: String): String {
+        val parts = ref.split('/')
+        val id = parts.getOrNull(1) ?: return ref
+        if (parts.firstOrNull() == "app") return id.substringAfterLast('.')
+        val branch = parts.getOrNull(3)?.let { " $it" } ?: ""
+        return when {
+            id.endsWith(".Locale") -> "translations"
+            ".GL." in id || ".GL32." in id -> "graphics drivers"
+            "codecs" in id.lowercase() || id.endsWith(".ffmpeg-full") -> "media codecs"
+            id.endsWith(".Platform") -> when (val vendor = id.removeSuffix(".Platform").substringAfterLast('.')) {
+                "gnome", "kde" -> vendor.uppercase()
+                else -> vendor.replaceFirstChar { it.uppercase() }
+            } + " runtime$branch"
+            else -> id.substringAfterLast('.')
+        }
     }
 
     /** The whole transaction's percentage: steps done, plus this one's share. */
