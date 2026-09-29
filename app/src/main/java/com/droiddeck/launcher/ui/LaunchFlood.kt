@@ -36,17 +36,12 @@ import kotlinx.coroutines.coroutineScope
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.core.spring
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.unit.Dp
 import java.lang.ref.WeakReference
 import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.pow
-import kotlin.math.sign
 import kotlin.math.sin
 
 // Starting a session from a blue button: the button grows until the page is its blue, and the
@@ -114,9 +109,6 @@ internal object QuitFlood {
     }
 }
 
-/** How far a stop's flood bulges and caves in flight: a share of its size, at the middle of the run. */
-internal const val QUIT_WARBLE = 0.065f
-
 /** The page a flood grows over, sinking back a touch as it is covered; [progress] is the flood's. */
 @Composable
 internal fun FloodBehind(progress: () -> Float, content: @Composable () -> Unit) {
@@ -142,14 +134,11 @@ internal fun LaunchFlood(
     /** The button's own colours, where it is not the page's blue one (a red Stop). */
     fromColors: Pair<Color, Color>? = null,
     cornerAtRest: Dp = 12.dp,
-    /** The sides bulging and caving in flight ([floodOutline]); 0 keeps the plain blob. */
-    warble: Float = 0f,
     onCovered: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
     val start = fromColors ?: (colors.primary to pal.primary2)
-    val outline = remember { Path() }
     // Left, top, right, bottom: 0 on the button, 1 on the page's edge. Springs overshoot past the
     // edge, off the page, so the wobble is felt in the pull and never seen as a shrink.
     val edges = remember { List(4) { Animatable(0f) } }
@@ -177,7 +166,7 @@ internal fun LaunchFlood(
         }
     }
     Canvas(Modifier.fillMaxSize().onSizeChanged { page = Size(it.width.toFloat(), it.height.toFloat()) }.pointerInput(Unit) { awaitEachGesture { while (true) awaitPointerEvent().changes.forEach { it.consume() } } }) {
-        drawFlood(from, edges.map { it.value }, start, pal.signal, cornerAtRest.toPx(), warble, outline)
+        drawFlood(from, edges.map { it.value }, start, pal.signal, cornerAtRest.toPx())
     }
 }
 
@@ -186,7 +175,7 @@ internal fun LaunchFlood(
  * bottom): the button sinking with the page behind, blobby in flight, its colours [start] giving
  * way to the flat [signal] in the first half.
  */
-private fun DrawScope.drawFlood(from: Rect, v: List<Float>, start: Pair<Color, Color>, signal: Color, cornerAtRest: Float, warble: Float, outline: Path) {
+private fun DrawScope.drawFlood(from: Rect, v: List<Float>, start: Pair<Color, Color>, signal: Color, cornerAtRest: Float) {
     val (l, t, r, b) = v
     val mean = v.sumOf { it.coerceIn(0f, 1f).toDouble() }.toFloat() / 4f
     // The button sinks with the page behind (FloodBehind), so the flood leaves from where it is now.
@@ -208,38 +197,8 @@ private fun DrawScope.drawFlood(from: Rect, v: List<Float>, start: Pair<Color, C
         listOf(lerp(start.first, signal, mix), lerp(start.second, signal, mix)),
         start = Offset(left, top), end = Offset(right, bottom),
     )
-    if (warble <= 0f) {
-        drawRoundRect(brush, topLeft = Offset(left, top), size = Size(w, h), cornerRadius = CornerRadius(corner))
-        return
-    }
-    floodOutline(outline, Rect(left, top, right, bottom), corner, warble * blob, SystemClock.uptimeMillis() / 1000f)
-    drawPath(outline, brush)
+    drawRoundRect(brush, topLeft = Offset(left, top), size = Size(w, h), cornerRadius = CornerRadius(corner))
 }
-
-/**
- * [r] with corners of [corner] as a superellipse, its sides pushed out and in by [amount] of its
- * size on three slow waves running opposite ways round, so no two sides swell alike.
- */
-private fun floodOutline(path: Path, r: Rect, corner: Float, amount: Float, time: Float) {
-    path.reset()
-    val a = (r.width / 2f).coerceAtLeast(0.5f)
-    val b = (r.height / 2f).coerceAtLeast(0.5f)
-    val n = lerp(14f, 2.2f, (corner / minOf(a, b)).coerceIn(0f, 1f))
-    val e = 2f / n
-    for (i in 0 until OUTLINE_POINTS) {
-        val th = i * 2f * PI.toFloat() / OUTLINE_POINTS
-        val c = cos(th)
-        val s = sin(th)
-        val wave = 0.55f * sin(3f * th + 7.3f * time + 0.4f) + 0.3f * sin(5f * th - 11.1f * time + 1.3f) + 0.15f * sin(2f * th + 4.7f * time)
-        val k = 1f + amount * wave
-        val x = r.center.x + a * sign(c) * abs(c).pow(e) * k
-        val y = r.center.y + b * sign(s) * abs(s).pow(e) * k
-        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-    }
-    path.close()
-}
-
-private const val OUTLINE_POINTS = 96
 
 /**
  * The front end's first frames after a stop: the page in [flood] after a beat, drawn back down
@@ -248,14 +207,13 @@ private const val OUTLINE_POINTS = 96
  * the page behind rise back. No button to return to: the blue fades. Calls [onLanded] at the end.
  */
 @Composable
-internal fun FloodReturn(flood: Color, to: Rect?, onProgress: (Float) -> Unit, warble: Float = QUIT_WARBLE, onLanded: () -> Unit) {
+internal fun FloodReturn(flood: Color, to: Rect?, onProgress: (Float) -> Unit, onLanded: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
     val edges = remember { List(4) { Animatable(1f) } }
     val fade = remember { Animatable(1f) }
     val landed by rememberUpdatedState(onLanded)
     val progress by rememberUpdatedState(onProgress)
-    val outline = remember { Path() }
     var page by remember { mutableStateOf(Size.Zero) }
     LaunchedEffect(page != Size.Zero) {
         if (page == Size.Zero) return@LaunchedEffect
@@ -284,7 +242,7 @@ internal fun FloodReturn(flood: Color, to: Rect?, onProgress: (Float) -> Unit, w
     }
     Canvas(Modifier.fillMaxSize().onSizeChanged { page = Size(it.width.toFloat(), it.height.toFloat()) }.pointerInput(Unit) { awaitEachGesture { while (true) awaitPointerEvent().changes.forEach { it.consume() } } }) {
         if (to == null) drawRect(flood, alpha = fade.value)
-        else drawFlood(to, edges.map { it.value }, colors.primary to pal.primary2, flood, 12.dp.toPx(), warble, outline)
+        else drawFlood(to, edges.map { it.value }, colors.primary to pal.primary2, flood, 12.dp.toPx())
     }
 }
 

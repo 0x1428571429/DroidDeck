@@ -424,7 +424,6 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
                         from, onProgress = {},
                         fromColors = error to androidx.compose.ui.graphics.lerp(error, androidx.compose.ui.graphics.Color.Black, 0.12f),
                         cornerAtRest = 20.dp,
-                        warble = com.droiddeck.launcher.ui.QUIT_WARBLE,
                     ) { finishFlooded() }
                 }
             }
