@@ -14,7 +14,15 @@ import java.io.File
  */
 object Library {
     /** [gameId] is what steam://rungameid/ takes: the appid for a Steam title, the shortcut id for an added game. */
-    class SteamGame(val appId: Int, val name: String, val art: File?, val library: String, val gameId: Long = appId.toLong())
+    /**
+     * [art] is the portrait capsule; [hero] the wide banner Steam shows above a game's page, when
+     * the client has cached one. [lastPlayed] is Steam's own "LastPlayed" (unix seconds), 0 = never.
+     */
+    class SteamGame(
+        val appId: Int, val name: String, val art: File?, val library: String, val gameId: Long = appId.toLong(),
+        val hero: File? = null, val lastPlayed: Long = 0L,
+        val gameFiles: File? = null, val protonPrefix: File? = null,
+    )
     class Rom(val name: String, val hostPath: File, val guestPath: String, val emulatorId: String, val art: File? = null)
     class Emulator(val id: String, val name: String, val system: String, val program: String, val installed: Boolean, val games: List<Rom>) {
         /** The emulator's own icon, bundled (the runtime keeps them as theme SVGs the app cannot draw). */
@@ -55,16 +63,35 @@ object Library {
         4690330, // Legacy Steam Runtime
     )
     private val STEAM_CAPSULES = listOf("library_capsule.jpg", "library_600x900.jpg")
+    private val STEAM_HEROES = listOf("library_hero.jpg")
     private val NAME = Regex("^\\s*\"name\"\\s*\"([^\"]*)\"", RegexOption.MULTILINE)
     private val STATE = Regex("^\\s*\"StateFlags\"\\s*\"(\\d+)\"", RegexOption.MULTILINE)
+    private val LAST_PLAYED = Regex("^\\s*\"LastPlayed\"\\s*\"(\\d+)\"", RegexOption.MULTILINE)
+    private val INSTALL_DIR = Regex("^\\s*\"installdir\"\\s*\"([^\"]*)\"", RegexOption.MULTILINE)
+
+    /** Steam's library roots visible to this launcher: its private default plus the selected library. */
+    private fun steamLibraries(context: Context): List<Pair<File, String>> {
+        val root = File(LinuxRuntime.rootDir(context), "root/.local/share/Steam")
+        return listOfNotNull(
+            root to "internal",
+            GameStorage.effective(context)?.let { File(it.path) to it.label },
+        )
+    }
+
+    /** Proton keeps each game's prefix below compatdata/<appid>/pfx in a Steam library. */
+    fun protonPrefix(context: Context, appId: Long, preferredLibrary: File? = null): File? {
+        val ids = listOf(appId.toString(), java.lang.Integer.toString(appId.toInt())).distinct()
+        val roots = (listOfNotNull(preferredLibrary) + steamLibraries(context).map { it.first })
+            .distinctBy { runCatching { it.canonicalPath }.getOrDefault(it.absolutePath) }
+        return roots.asSequence()
+            .flatMap { root -> ids.asSequence().map { id -> File(root, "steamapps/compatdata/$id/pfx") } }
+            .firstOrNull { it.isDirectory }
+    }
 
     fun steamGames(context: Context): List<SteamGame> {
         val root = File(LinuxRuntime.rootDir(context), "root/.local/share/Steam")
         val cache = File(root, "appcache/librarycache")
-        val libraries = listOfNotNull(
-            root to "internal",
-            GameStorage.effective(context)?.let { File(it.path) to it.label },
-        )
+        val libraries = steamLibraries(context)
         val out = LinkedHashMap<Int, SteamGame>()
         for ((library, label) in libraries) {
             val steamapps = File(library, "steamapps")
@@ -77,19 +104,31 @@ object Library {
                     val flags = STATE.find(text)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                     // StateFlags 4 = fully installed; anything else is downloading, updating or broken.
                     if (name.isEmpty() || flags and 4 == 0) return@forEach
-                    val art = steamCapsule(cache, appId)
-                    out[appId] = SteamGame(appId, name, art, label)
+                    val art = steamCacheImage(cache, appId, STEAM_CAPSULES)
+                    val hero = steamCacheImage(cache, appId, STEAM_HEROES)
+                    val lastPlayed = LAST_PLAYED.find(text)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+                    // App manifests are Valve KeyValues (VDF) files. installdir is one folder
+                    // below steamapps/common; only expose it when the directory exists and the
+                    // manifest value cannot escape that directory.
+                    val installDir = INSTALL_DIR.find(text)?.groupValues?.get(1)?.trim()
+                        ?.takeIf { it.isNotEmpty() && it != "." && it != ".." && '/' !in it && '\\' !in it }
+                    val gameFiles = installDir?.let { File(steamapps, "common/$it").takeIf(File::isDirectory) }
+                    out[appId] = SteamGame(
+                        appId, name, art, label, hero = hero, lastPlayed = lastPlayed,
+                        gameFiles = gameFiles,
+                        protonPrefix = protonPrefix(context, appId.toLong(), library),
+                    )
                 }
         }
         return out.values.toList()
     }
 
-    /** Steam stores current library capsules inside hash-named folders under the app's cache dir. */
-    private fun steamCapsule(cache: File, appId: Int): File? {
+    /** Steam stores current library art inside hash-named folders under the app's cache dir. */
+    private fun steamCacheImage(cache: File, appId: Int, names: List<String>): File? {
         val appDir = File(cache, appId.toString())
         val dirs = listOf(appDir) + appDir.listFiles()
             .orEmpty().filter { it.isDirectory }.sortedBy { it.name }
-        return STEAM_CAPSULES.asSequence()
+        return names.asSequence()
             .flatMap { name -> dirs.asSequence().map { File(it, name) } }
             .firstOrNull { it.isFile && it.length() > 0L }
     }
@@ -278,7 +317,9 @@ object Library {
             "-C", "Dolphin.General.HotkeysRequireFocus=False", "-C", "Dolphin.Input.BackgroundInput=True",
             "-e", guestPath,
         )
-        "cemu" -> listOf("-g", guestPath)
+        // Full screen (LaunchSettings.cpp -f); the settings seed keeps the Getting Started
+        // dialog away (bannerlator-pad-defaults).
+        "cemu" -> listOf("-f", "-g", guestPath)
         // Full screen (CLI.cpp --fullscreen); the guide button leaves it for melonDS's menus and
         // comes back (HK_FullscreenToggle, bannerlator-pad-defaults).
         "melonds" -> listOf("-f", guestPath)

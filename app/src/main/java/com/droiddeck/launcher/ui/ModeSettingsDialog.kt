@@ -16,6 +16,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
+import com.droiddeck.launcher.R
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.unit.dp
@@ -68,6 +70,10 @@ class ModeSettings(
     val forceFullscreen: Boolean? = null,
     /** Steam only: the client branch forced on the command line. */
     val steamChannel: String? = null,
+    /** Steam only: enable the SteamOS client interface and its performance controls. */
+    val steamDeckMode: Boolean = false,
+    /** Steam only: start a Steam session when DroidDeck opens. */
+    val runSteamAtStartup: Boolean = false,
     /** Steam only: the user's chosen Games folders; null outside Steam. */
     val addedGamesDirs: List<String>? = null,
     val addedGames: List<AddedGameRow> = emptyList(),
@@ -122,6 +128,8 @@ class ModeSettingsActions(
     val onFexPreset: (String) -> Unit = {},
     val onForceFullscreen: (Boolean) -> Unit = {},
     val onSteamChannel: (String) -> Unit = {},
+    val onSteamDeckMode: (Boolean) -> Unit = {},
+    val onRunSteamAtStartup: (Boolean) -> Unit = {},
     val onPickAddedGamesDir: () -> Unit = {},
     val onForgetAddedGamesDir: (path: String) -> Unit = {},
     val onAddedGamesArt: (Boolean) -> Unit = {},
@@ -289,6 +297,13 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 onPick = a.onSuspendPolicy,
             )
         }
+        if (steam) SettingsGroup("Startup") {
+            ToggleRow(
+                host, "steam-startup", "Run Steam when DroidDeck starts",
+                "Open the Steam session when you launch DroidDeck.",
+                s.runSteamAtStartup, onChange = a.onRunSteamAtStartup,
+            )
+        }
         if (steam) SettingsGroup("Decky") {
             val updateAvailable = s.deckyInstalled != null && s.deckyLatestRelease != null &&
                 s.deckyInstalled != s.deckyLatestRelease.tag
@@ -342,6 +357,11 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
             }
         }
         if (steam && s.steamChannel != null) SettingsGroup("Client") {
+            ToggleRow(
+                host, "steamdeck", "Steam Deck mode",
+                "Enables Steam's Deck interface and Quick Access performance overlay controls. Applies next session.",
+                s.steamDeckMode, onChange = a.onSteamDeckMode,
+            )
             ChoiceRow(
                 host, "channel", "Client branch", "The Steam client build the session forces. Applies at the next session start; the client may update itself once.",
                 listOf("publicbeta" to "Public beta", "steamdeck_publicbeta" to "Steam Deck public beta"), s.steamChannel,
@@ -353,13 +373,13 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
             for (dir in s.addedGamesDirs) {
                 val n = s.addedGames.count { it.folderPath.startsWith("$dir/") }
                 ActionRow(
-                    dir.substringAfterLast('/').ifEmpty { dir }, dir + " · " + (if (n == 0) "no game folders with a .exe found" else "$n game${if (n == 1) "" else "s"}") + ". Forget: the games leave the client's library at the next session start; nothing on disk is touched.",
+                    dir.substringAfterLast('/').ifEmpty { dir }, dir + " · " + (if (n == 0) "no game folders with a .exe found" else "$n game${if (n == 1) "" else "s"}") + ". " + stringResource(R.string.added_games_forget_hint),
                     "Forget", onClick = { a.onForgetAddedGamesDir(dir) },
                 )
             }
             ActionRow(
                 if (s.addedGamesDirs.isEmpty()) "Games folder" else "Another games folder",
-                "Your own Windows games, one subfolder each, anywhere: internal storage, the SD card, a USB drive. As many folders as you like. Each game goes into the client's library as a non-Steam game under the ARM64 Proton, at the next session start.",
+                stringResource(R.string.added_games_import_hint),
                 "Add…", onClick = a.onPickAddedGamesDir,
             )
             ToggleRow(
@@ -374,12 +394,13 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 onPick = { path -> if (path == "__pick__") a.onPickAddedGameExe(g.folderPath) else a.onAddedGameExe(g.folderPath, path) },
             )
         }
-        if (steam && s.fexPreset != null) SettingsGroup("Games") {
+        if (steam && s.fexPreset != null) SettingsGroup(stringResource(R.string.game_settings_title)) {
             ChoiceRow(
-                host, "fex", "FEX preset", "Applies on next game launch.",
-                FexPreset.all.map { it.id to it.label }, s.fexPreset,
-                note = FexPreset.byId(s.fexPreset).detail, onPick = a.onFexPreset,
+                host, "fex", stringResource(R.string.fex_preset_title), stringResource(R.string.fex_next_launch),
+                FexPreset.all.map { it.id to stringResource(it.label) }, s.fexPreset,
+                note = stringResource(FexPreset.byId(s.fexPreset).detail), onPick = a.onFexPreset,
             )
+            GameEnvironmentRow()
             if (s.forceFullscreen != null) ToggleRow(
                 host, "fill", "Stretch games to fill the screen",
                 "Keeps games that resize their own window (FlatOut) full screen. Turn it off if a game shows up small in a corner (Quake 3). Applies next session.",
@@ -406,7 +427,7 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
             val open = host.open == "storage"
             SettingsRow(
                 "Second library",
-                "Adds a library location in Steam. Applies next session.",
+                stringResource(R.string.second_library_import_hint),
                 highlighted = open,
             ) {
                 androidx.compose.foundation.layout.Box {

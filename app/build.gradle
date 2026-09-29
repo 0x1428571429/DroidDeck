@@ -63,8 +63,8 @@ android {
         // file out of its own data directory, and this app's entire job is to exec a rootfs:
         // proot, gamescope, the Steam client and everything it launches all live under files/.
         targetSdkVersion 28
-        versionCode 8
-        versionName "0.1.7"
+        versionCode 9
+        versionName "0.2.0"
         buildConfigField "String", "BUILD_LABEL", "\"${escapedBuildLabel}\""
 
         ndk {
@@ -140,6 +140,11 @@ android {
         buildConfig true
     }
 
+    testOptions {
+        // Plain JVM tests: a stray android.util.Log call returns a default instead of throwing.
+        unitTests.returnDefaultValues = true
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -152,7 +157,7 @@ android {
 dependencies {
     // The runtime tarball is a zstd-compressed tar.
     implementation 'com.github.luben:zstd-jni:1.5.2-3@aar'
-    implementation 'org.apache.commons:commons-compress:1.20'
+    implementation 'org.apache.commons:commons-compress:1.27.1'
     // The UI: every menu, dialog and overlay is Compose. The session's SurfaceView and the
     // on-screen pad are Views underneath it, which is what they are in every Compose app.
     implementation platform('androidx.compose:compose-bom:2024.02.00')
@@ -169,4 +174,7 @@ dependencies {
     implementation 'com.flyfishxu:kadb-android:1.2.1'
     // Android terminal view/emulator used by the in-session secondary-display Linux shell.
     implementation 'com.termux.termux-app:terminal-view:0.118.0'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.16.1'
 }

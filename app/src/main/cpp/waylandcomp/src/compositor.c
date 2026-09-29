@@ -30,6 +30,7 @@
 #include <time.h>
 #include <stdarg.h>
 #include <errno.h>
+#include <poll.h>
 #include <sys/timerfd.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
@@ -52,6 +53,7 @@
 #include "effects_chain.h"
 #include "banner_ext.h"
 #include "banner_color.h"
+#include "compositor_internal.h"
 
 #define WLOGI(...) __android_log_print(ANDROID_LOG_INFO, "BannerWayland", __VA_ARGS__)
 #define WLOGE(...) __android_log_print(ANDROID_LOG_ERROR, "BannerWayland", __VA_ARGS__)
@@ -162,21 +164,9 @@ static int log_budget(void) {
 
 static struct wl_display *g_display;
 
-/* Which program each Wayland client is (from /proc/<pid>/cmdline), for the session log. */
-struct client_info {
-    struct wl_client *client;
-    struct wl_listener destroy;
-    pid_t pid;
-    char name[64];
-    /* An OpenGL program whose EGL gave up on the GPU: it asked for dma-buf feedback (EGL's
-     * Wayland GPU path always does), never made a dma-buf buffer, and draws wl_shm frames. */
-    unsigned asked_feedback : 1, shm_gl_said : 1;
-    unsigned dmabuf_buffers, shm_frames;
-    struct client_info *next;
-};
 static struct client_info *g_clients;
 
-static struct client_info *client_info_of(struct wl_client *client) {
+struct client_info *client_info_of(struct wl_client *client) {
     for (struct client_info *ci = g_clients; ci; ci = ci->next)
         if (ci->client == client) return ci;
     return NULL;
@@ -249,6 +239,8 @@ struct surface {
     struct dmabuf_buffer *dmabuf_buf;       /* its imported image, kept until replaced or the surface goes */
     struct wl_listener dmabuf_destroy;
     int buf_w, buf_h, has_content;
+    int buf_alpha;
+    int opaque[4], pending_opaque[4], pending_opaque_set; /* x, y, w, h; w = 0: none */
     int src_set, dst_set;
     float src[4];
     int dst[2];
@@ -259,6 +251,10 @@ struct surface {
     int releases_pending;                   /* FPS limiter: buffers of this surface still to be released */
 
     enum surface_role role;
+    /* A role-less surface's last buffer, held unreleased: it may become the pointer's image
+     * (wl_pointer.set_cursor after the commit, which is wlroots' order). */
+    struct wl_resource *idle_buffer;
+    struct wl_listener idle_buffer_destroy;
     struct wl_resource *xdg_surface, *xdg_toplevel;
     struct wl_resource *viewport;
 
@@ -473,6 +469,12 @@ static struct seat_pointer g_ptrs[MAX_PTRS];
 static int g_nptrs;
 static struct seat_keyboard g_kbs[MAX_PTRS];
 static int g_nkbs;
+/* Modifier state in the keymap's real-modifier bits (Shift=0x1, Lock=0x2, Control=0x4, Mod1=0x8,
+ * Mod4=0x40). A client of the wayland backend - gamescope, labwc - takes modifiers only from
+ * wl_keyboard.modifiers and ignores what a Shift key event does to its xkb state, so without this
+ * every capital arrived lowercase. */
+static uint32_t g_mods_depressed, g_mods_locked;
+static uint32_t g_mod_keys_held; /* one bit per modifier key below, so a repeat press is harmless */
 static struct seat_touch g_touches[MAX_PTRS];
 static int g_ntouches;
 
@@ -487,12 +489,21 @@ static int g_ntouches;
 #define CURSOR_MAX_PX (256 * 256)
 static pthread_mutex_t g_cursor_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct surface *g_cursor_surface;     /* compositor thread only */
+static struct surface *g_cursor_shown;       /* compositor thread: whose image g_cursor_px holds */
 static int g_cursor_hx, g_cursor_hy;         /* hotspot, surface-local */
 static uint32_t g_cursor_px[CURSOR_MAX_PX];  /* guarded by g_cursor_lock: ARGB8888 snapshot */
 static uint32_t g_cursor_rb[CURSOR_MAX_PX];  /* compositor thread: GPU readback staging */
 static int g_cursor_w, g_cursor_h;           /* 0 = nothing to draw */
 static int g_cursor_hidden = 1;              /* the client asked for no pointer */
 static int g_cursor_serial;                  /* bumped on every change; the app polls it */
+
+/* The last image again, after a hide: the same surface set as the pointer once more with nothing
+ * newly committed to it (wlroots re-sets its cursor surface each time the pointer enters). */
+static void cursor_publish_shown(void) {
+    pthread_mutex_lock(&g_cursor_lock);
+    if (g_cursor_w > 0) { g_cursor_hidden = 0; g_cursor_serial++; }  /* serial: the hotspot may be new */
+    pthread_mutex_unlock(&g_cursor_lock);
+}
 
 static void cursor_publish_hidden(void) {
     pthread_mutex_lock(&g_cursor_lock);
@@ -501,7 +512,7 @@ static void cursor_publish_hidden(void) {
 }
 
 static void cursor_publish_pixels(const uint8_t *src, int w, int h, size_t stride, int hx, int hy) {
-    if (w <= 0 || h <= 0 || w * h > CURSOR_MAX_PX) return;
+    if (w <= 0 || h <= 0 || (int64_t)w * h > CURSOR_MAX_PX) return;
     pthread_mutex_lock(&g_cursor_lock);
     for (int y = 0; y < h; y++)
         memcpy(&g_cursor_px[y * w], src + (size_t)y * stride, (size_t)w * 4);
@@ -514,10 +525,13 @@ static void cursor_publish_pixels(const uint8_t *src, int w, int h, size_t strid
 
 static void cursor_publish_shm(struct wl_shm_buffer *shm, int hx, int hy) {
     int32_t w = wl_shm_buffer_get_width(shm), h = wl_shm_buffer_get_height(shm);
-    if (w <= 0 || h <= 0 || w * h > CURSOR_MAX_PX) return;
+    int32_t stride = wl_shm_buffer_get_stride(shm);
+    if (w <= 0 || h <= 0 || (int64_t)w * h > CURSOR_MAX_PX) return;
+    /* libwayland only promises stride >= width; each row copied here is width * 4 bytes, so a
+     * shorter stride would read past the end of the client's pool. */
+    if ((int64_t)stride < (int64_t)w * 4) return;
     wl_shm_buffer_begin_access(shm);
-    cursor_publish_pixels((const uint8_t *)wl_shm_buffer_get_data(shm), w, h,
-                          (size_t)wl_shm_buffer_get_stride(shm), hx, hy);
+    cursor_publish_pixels((const uint8_t *)wl_shm_buffer_get_data(shm), w, h, (size_t)stride, hx, hy);
     wl_shm_buffer_end_access(shm);
 }
 
@@ -558,40 +572,7 @@ static void constraints_focus_entered(struct wl_resource *target, struct wl_clie
 
 /* ------------------------------------------------------------------ dmabuf buffers */
 
-#define FOURCC(a, b, c, d) \
-    ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
-#define DRM_ARGB8888 FOURCC('A', 'R', '2', '4')
-#define DRM_XRGB8888 FOURCC('X', 'R', '2', '4')
-#define DRM_ABGR8888 FOURCC('A', 'B', '2', '4')
-#define DRM_XBGR8888 FOURCC('X', 'B', '2', '4')
-#define MOD_LINEAR VKP_MOD_LINEAR
-#define MOD_INVALID VKP_MOD_INVALID
-#define MAX_PLANES 4
-
-struct dmabuf_params {
-    int fd[MAX_PLANES];
-    uint32_t offset[MAX_PLANES], stride[MAX_PLANES];
-    uint64_t modifier[MAX_PLANES];
-    int n_planes;
-};
-struct dmabuf_buffer {
-    int fd[MAX_PLANES];
-    uint32_t offset[MAX_PLANES], stride[MAX_PLANES];
-    int n_planes;
-    int32_t width, height;
-    uint32_t format;
-    uint64_t modifier;
-    struct vkp_image *img;                  /* imported once, reused for every frame */
-    int import_failed;
-    /* One reference for the wl_buffer resource, one per surface showing the buffer. Mesa destroys
-     * a swapchain's wl_buffers the moment the game rebuilds its swapchain, i.e. while the last
-     * committed one is still what is on screen: the import (and the dma-buf memory it pins) stays
-     * until the surface commits something newer, so the picture never blinks to black. */
-    int refs;
-    void *ahb_state;                        /* zero-copy: ahb_swapchain.c's record (the game's AHardwareBuffer) */
-};
-
-static void dmabuf_buffer_unref(struct dmabuf_buffer *b) {
+void dmabuf_buffer_unref(struct dmabuf_buffer *b) {
     if (!b || --b->refs > 0) return;
     vkp_image_destroy(b->img);
     for (int i = 0; i < b->n_planes; i++)
@@ -602,7 +583,7 @@ static void dmabuf_buffer_unref(struct dmabuf_buffer *b) {
 static void dbuf_buffer_destroy_req(struct wl_client *c, struct wl_resource *r) {
     wl_resource_destroy(r);
 }
-static const struct wl_buffer_interface dbuf_buffer_impl = {
+const struct wl_buffer_interface dbuf_buffer_impl = {
     .destroy = dbuf_buffer_destroy_req,
 };
 
@@ -744,6 +725,7 @@ static void take_shm(struct surface *s, struct wl_shm_buffer *shm, struct wl_res
     wl_buffer_send_release(buffer);
     s->buf_w = w;
     s->buf_h = h;
+    s->buf_alpha = wl_shm_buffer_get_format(shm) == WL_SHM_FORMAT_ARGB8888;
     s->has_content = s->shm_img != NULL;
     g_stat_shm++;
     struct client_info *ci = client_info_of(wl_resource_get_client(s->resource));
@@ -812,6 +794,7 @@ static void take_dmabuf(struct surface *s, struct dmabuf_buffer *b, struct wl_re
     }
     s->buf_w = b->width;
     s->buf_h = b->height;
+    s->buf_alpha = (b->format & 0xff) == 'A';
     s->has_content = b->img != NULL;
     g_stat_dmabuf++;
     const int announced_now = !s->announced_vulkan;
@@ -983,12 +966,93 @@ static void surface_frame(struct wl_client *c, struct wl_resource *r, uint32_t c
     wl_resource_set_implementation(callback, NULL, NULL, frame_callback_destroy);
     wl_list_insert(s->pending_frames.prev, wl_resource_get_link(callback));
 }
+/* The bounding box serves pointer confinement. The exact flag also tells opaque-region handling
+ * whether the bounding box itself is the whole region. */
+struct region { int set, exact; int x, y, w, h; };
+
+/* A wl_surface's opaque region is pending until its next commit. An exact region that covers
+ * the surface lets the blit path keep handling an otherwise alpha-capable buffer. */
 static void surface_set_opaque(struct wl_client *c, struct wl_resource *r,
-                               struct wl_resource *region) {}
+                               struct wl_resource *region) {
+    struct surface *s = wl_resource_get_user_data(r);
+    struct region *rg = region ? wl_resource_get_user_data(region) : NULL;
+    memset(s->pending_opaque, 0, sizeof(s->pending_opaque));
+    s->pending_opaque_set = 1;
+    if (rg && rg->set && rg->exact) {
+        s->pending_opaque[0] = rg->x;
+        s->pending_opaque[1] = rg->y;
+        s->pending_opaque[2] = rg->w;
+        s->pending_opaque[3] = rg->h;
+    }
+    struct client_info *ci = client_info_of(c);
+    if (ci) ci->declares_opaque = 1;
+}
 static void surface_set_input(struct wl_client *c, struct wl_resource *r,
                               struct wl_resource *region) {}
 
 static void send_toplevel_configure(struct surface *s);
+
+/* The pointer image from a cursor surface's buffer: wl_shm is copied, a dma-buf (labwc on a GPU
+ * renderer) is read back once the client's render into it is done - its implicit fence, as the
+ * zero-copy path waits for it (ahb_swapchain_present). */
+static void cursor_publish_buffer(struct surface *s, struct wl_resource *buffer) {
+    struct dmabuf_buffer *db = get_dmabuf(buffer);
+    struct wl_shm_buffer *shm = db ? NULL : wl_shm_buffer_get(buffer);
+    if (shm) {
+        cursor_publish_shm(shm, g_cursor_hx, g_cursor_hy);
+    } else if (db && db->n_planes >= 1 && db->width > 0 && db->height > 0 &&
+               (int64_t)db->width * db->height <= CURSOR_MAX_PX) {
+        if (!db->img && !db->import_failed) {
+            db->img = vkp_image_from_dmabuf(db->fd[0], db->format, db->modifier, db->width, db->height,
+                                            db->stride[0], db->offset[0]);
+            if (!db->img) db->import_failed = 1;
+        }
+        if (!db->img) return;
+        struct pollfd p = {.fd = db->fd[0], .events = POLLIN};
+        int r;
+        do { r = poll(&p, 1, 100); } while (r < 0 && errno == EINTR);
+        if (vkp_image_readback(db->img, g_cursor_rb, CURSOR_MAX_PX) != 0) return;
+        cursor_publish_pixels((const uint8_t *)g_cursor_rb, db->width, db->height,
+                              (size_t)db->width * 4, g_cursor_hx, g_cursor_hy);
+    } else {
+        return;
+    }
+    g_cursor_shown = s;
+}
+
+static void on_idle_buffer_destroyed(struct wl_listener *l, void *data) {
+    struct surface *s = wl_container_of(l, s, idle_buffer_destroy);
+    wl_list_remove(&s->idle_buffer_destroy.link);
+    wl_list_init(&s->idle_buffer_destroy.link);
+    s->idle_buffer = NULL;
+}
+
+/* Only what could be a pointer image is held; anything larger goes straight back. */
+static void surface_hold_idle(struct surface *s, struct wl_resource *buffer) {
+    struct dmabuf_buffer *db = get_dmabuf(buffer);
+    struct wl_shm_buffer *shm = db ? NULL : wl_shm_buffer_get(buffer);
+    int64_t px = db ? (int64_t)db->width * db->height
+               : shm ? (int64_t)wl_shm_buffer_get_width(shm) * wl_shm_buffer_get_height(shm) : 0;
+    if (px <= 0 || px > CURSOR_MAX_PX) { wl_buffer_send_release(buffer); return; }
+    s->idle_buffer = buffer;
+    s->idle_buffer_destroy.notify = on_idle_buffer_destroyed;
+    wl_resource_add_destroy_listener(buffer, &s->idle_buffer_destroy);
+}
+
+/* Lets go of the held buffer; release = give it back to the client (not while it is going away). */
+static struct wl_resource *surface_take_idle(struct surface *s) {
+    struct wl_resource *buffer = s->idle_buffer;
+    if (!buffer) return NULL;
+    wl_list_remove(&s->idle_buffer_destroy.link);
+    wl_list_init(&s->idle_buffer_destroy.link);
+    s->idle_buffer = NULL;
+    return buffer;
+}
+
+static void surface_drop_idle(struct surface *s) {
+    struct wl_resource *buffer = surface_take_idle(s);
+    if (buffer) wl_buffer_send_release(buffer);
+}
 
 static void surface_commit(struct wl_client *c, struct wl_resource *r) {
     struct surface *s = wl_resource_get_user_data(r);
@@ -1013,6 +1077,10 @@ static void surface_commit(struct wl_client *c, struct wl_resource *r) {
         memcpy(s->dst, s->pending_dst, sizeof(s->dst));
         s->pending_dst_set = 0;
     }
+    if (s->pending_opaque_set) {
+        memcpy(s->opaque, s->pending_opaque, sizeof(s->opaque));
+        s->pending_opaque_set = 0;
+    }
 
     if (s->pending_attach) {
         struct wl_resource *buffer = s->pending_buffer;
@@ -1031,29 +1099,21 @@ static void surface_commit(struct wl_client *c, struct wl_resource *r) {
         s->pending_buffer = NULL;
         s->pending_attach = 0;
 
+        surface_drop_idle(s);  /* replaced, whatever the surface is now */
         if (s->role == ROLE_CURSOR) {
             /* The client's pointer image, copied out for the app's overlay (see cursor_publish_*)
              * rather than composited, so it survives the zero-copy and HDR layer paths. */
             if (!buffer) {
                 cursor_publish_hidden();  /* wlroots clears its cursor surface to hide the pointer */
-            } else if (shm) {
-                cursor_publish_shm(shm, g_cursor_hx, g_cursor_hy);
             } else if (has_single_pixel) {
                 cursor_publish_pixels((const uint8_t *)&pixel, 1, 1, 4, g_cursor_hx, g_cursor_hy);
-            } else if (db && db->n_planes >= 1 && db->width * db->height <= CURSOR_MAX_PX) {
-                if (!db->img && !db->import_failed) {
-                    db->img = vkp_image_from_dmabuf(db->fd[0], db->format, db->modifier, db->width, db->height,
-                                                    db->stride[0], db->offset[0]);
-                    if (!db->img) db->import_failed = 1;
-                }
-                if (db->img && vkp_image_readback(db->img, g_cursor_rb, CURSOR_MAX_PX) == 0)
-                    cursor_publish_pixels((const uint8_t *)g_cursor_rb, db->width, db->height,
-                                          (size_t)db->width * 4, g_cursor_hx, g_cursor_hy);
+            } else {
+                cursor_publish_buffer(s, buffer);
             }
             if (buffer) wl_buffer_send_release(buffer);
         } else if (s->role == ROLE_NONE) {
-            /* Role-less surface: never drawn. */
-            if (buffer) wl_buffer_send_release(buffer);
+            /* Role-less surface: never drawn, but its buffer is kept for a set_cursor to come. */
+            if (buffer) surface_hold_idle(s, buffer);
         } else if (db) {
             take_dmabuf(s, db, buffer);
         } else if (shm) {
@@ -1128,6 +1188,8 @@ static void surface_resource_destroy(struct wl_resource *r) {
     for (int i = 0; i < g_nkbs; i++) if (g_kbs[i].focus == r) g_kbs[i].focus = NULL;
     touch_cancel_surface(s);
     if (g_cursor_surface == s) { g_cursor_surface = NULL; cursor_publish_hidden(); }
+    if (g_cursor_shown == s) g_cursor_shown = NULL;
+    surface_take_idle(s);
     if (g_grab == s) g_grab = NULL;
     if (g_key_target == s) g_key_target = NULL;
     if (g_ime_click == s) g_ime_click = NULL;
@@ -1164,24 +1226,29 @@ static void surface_resource_destroy(struct wl_resource *r) {
 
 /* ------------------------------------------------------------------ wl_region */
 
-/* A region is kept as the bounding box of its rectangles: enough for pointer confinement,
- * where winewayland sends one rectangle (the ClipCursor area). Subtractions are ignored. */
-struct region { int set; int x, y, w, h; };
-
 static void region_destroy(struct wl_client *c, struct wl_resource *r) { wl_resource_destroy(r); }
 static void region_add(struct wl_client *c, struct wl_resource *r,
                        int32_t x, int32_t y, int32_t w, int32_t h) {
     struct region *rg = wl_resource_get_user_data(r);
     if (!rg || w <= 0 || h <= 0) return;
-    if (!rg->set) { rg->x = x; rg->y = y; rg->w = w; rg->h = h; rg->set = 1; return; }
-    int x2 = rg->x + rg->w > x + w ? rg->x + rg->w : x + w;
-    int y2 = rg->y + rg->h > y + h ? rg->y + rg->h : y + h;
+    if (!rg->set) { rg->x = x; rg->y = y; rg->w = w; rg->h = h; rg->set = rg->exact = 1; return; }
+    long long x2 = (long long)rg->x + rg->w, y2 = (long long)rg->y + rg->h;
+    long long nx2 = (long long)x + w, ny2 = (long long)y + h;
+    int inside = x >= rg->x && y >= rg->y && nx2 <= x2 && ny2 <= y2;
+    int around = x <= rg->x && y <= rg->y && nx2 >= x2 && ny2 >= y2;
+    if (!inside && !around) rg->exact = 0;
+    if (nx2 > x2) x2 = nx2;
+    if (ny2 > y2) y2 = ny2;
     if (x < rg->x) rg->x = x;
     if (y < rg->y) rg->y = y;
-    rg->w = x2 - rg->x; rg->h = y2 - rg->y;
+    rg->w = (int)(x2 - rg->x > INT32_MAX ? INT32_MAX : x2 - rg->x);
+    rg->h = (int)(y2 - rg->y > INT32_MAX ? INT32_MAX : y2 - rg->y);
 }
 static void region_subtract(struct wl_client *c, struct wl_resource *r,
-                            int32_t x, int32_t y, int32_t w, int32_t h) {}
+                            int32_t x, int32_t y, int32_t w, int32_t h) {
+    struct region *rg = wl_resource_get_user_data(r);
+    if (rg && w > 0 && h > 0) rg->exact = 0;
+}
 static void region_resource_destroy(struct wl_resource *r) { free(wl_resource_get_user_data(r)); }
 static const struct wl_region_interface region_impl = {
     .destroy = region_destroy,
@@ -1204,6 +1271,7 @@ static void compositor_create_surface(struct wl_client *c, struct wl_resource *r
     wl_list_init(&s->child_link);
     wl_list_init(&s->toplevel_link);
     wl_list_init(&s->pending_buffer_destroy.link);
+    wl_list_init(&s->idle_buffer_destroy.link);
     wl_list_insert(&g_surfaces, &s->link);
     wl_resource_set_implementation(s->resource, &surface_impl, s, surface_resource_destroy);
 }
@@ -1669,319 +1737,6 @@ static void bind_desktop(struct wl_client *c, void *data, uint32_t ver, uint32_t
     wl_resource_set_implementation(r, &desktop_impl, NULL, NULL);
 }
 
-/* ------------------------------------------------------------ zwp_linux_dmabuf_v1 */
-
-static void dbuf_buffer_resource_destroy(struct wl_resource *r) {
-    dmabuf_buffer_unref(wl_resource_get_user_data(r));
-}
-
-static void params_destroy(struct wl_client *c, struct wl_resource *r) { wl_resource_destroy(r); }
-static void params_add(struct wl_client *c, struct wl_resource *r, int32_t fd, uint32_t plane,
-                       uint32_t offset, uint32_t stride, uint32_t mod_hi, uint32_t mod_lo) {
-    struct dmabuf_params *p = wl_resource_get_user_data(r);
-    if (plane >= MAX_PLANES) { close(fd); return; }
-    if (p->fd[plane] >= 0) close(p->fd[plane]);
-    p->fd[plane] = fd;
-    p->offset[plane] = offset;
-    p->stride[plane] = stride;
-    p->modifier[plane] = ((uint64_t)mod_hi << 32) | mod_lo;
-    if ((int)plane + 1 > p->n_planes) p->n_planes = plane + 1;
-}
-static struct wl_resource *params_do_create(struct wl_client *c, struct wl_resource *r, uint32_t id,
-                                            int32_t w, int32_t h, uint32_t format, uint32_t flags) {
-    struct dmabuf_params *p = wl_resource_get_user_data(r);
-    struct dmabuf_buffer *b = calloc(1, sizeof(*b));
-    if (!b) return NULL;
-    b->n_planes = p->n_planes;
-    b->refs = 1; /* the wl_buffer resource's */
-    b->width = w; b->height = h; b->format = format;
-    b->modifier = p->modifier[0];
-    for (int i = 0; i < MAX_PLANES; i++) b->fd[i] = -1;
-    for (int i = 0; i < p->n_planes; i++) {
-        b->fd[i] = p->fd[i];
-        b->offset[i] = p->offset[i];
-        b->stride[i] = p->stride[i];
-        p->fd[i] = -1; /* ownership moves to the buffer */
-    }
-    struct wl_resource *buf = wl_resource_create(c, &wl_buffer_interface, 1, id);
-    if (!buf) {
-        for (int i = 0; i < b->n_planes; i++) if (b->fd[i] >= 0) close(b->fd[i]);
-        free(b);
-        wl_client_post_no_memory(c);
-        return NULL;
-    }
-    wl_resource_set_implementation(buf, &dbuf_buffer_impl, b, dbuf_buffer_resource_destroy);
-    struct client_info *ci = client_info_of(c);
-    if (ci) ci->dmabuf_buffers++;
-    return buf;
-}
-static void params_create(struct wl_client *c, struct wl_resource *r, int32_t w, int32_t h,
-                          uint32_t format, uint32_t flags) {
-    struct wl_resource *buf = params_do_create(c, r, 0, w, h, format, flags);
-    if (buf) zwp_linux_buffer_params_v1_send_created(r, buf);
-    else zwp_linux_buffer_params_v1_send_failed(r);
-}
-static void params_create_immed(struct wl_client *c, struct wl_resource *r, uint32_t buffer_id,
-                                int32_t w, int32_t h, uint32_t format, uint32_t flags) {
-    params_do_create(c, r, buffer_id, w, h, format, flags);
-}
-static const struct zwp_linux_buffer_params_v1_interface params_impl = {
-    .destroy = params_destroy,
-    .add = params_add,
-    .create = params_create,
-    .create_immed = params_create_immed,
-};
-static void params_resource_destroy(struct wl_resource *r) {
-    struct dmabuf_params *p = wl_resource_get_user_data(r);
-    if (!p) return;
-    for (int i = 0; i < MAX_PLANES; i++)
-        if (p->fd[i] >= 0) close(p->fd[i]);
-    free(p);
-}
-
-static void dmabuf_destroy(struct wl_client *c, struct wl_resource *r) { wl_resource_destroy(r); }
-static void dmabuf_create_params(struct wl_client *c, struct wl_resource *r, uint32_t id) {
-    struct dmabuf_params *p = calloc(1, sizeof(*p));
-    if (!p) { wl_client_post_no_memory(c); return; }
-    for (int i = 0; i < MAX_PLANES; i++) p->fd[i] = -1;
-    struct wl_resource *pr = wl_resource_create(c, &zwp_linux_buffer_params_v1_interface,
-                                                wl_resource_get_version(r), id);
-    if (!pr) { free(p); wl_client_post_no_memory(c); return; }
-    wl_resource_set_implementation(pr, &params_impl, p, params_resource_destroy);
-}
-static void dmabuf_get_default_feedback(struct wl_client *c, struct wl_resource *r, uint32_t id);
-static void dmabuf_get_surface_feedback(struct wl_client *c, struct wl_resource *r, uint32_t id,
-                                        struct wl_resource *surface);
-static const struct zwp_linux_dmabuf_v1_interface dmabuf_impl = {
-    .destroy = dmabuf_destroy,
-    .create_params = dmabuf_create_params,
-    .get_default_feedback = dmabuf_get_default_feedback,
-    .get_surface_feedback = dmabuf_get_surface_feedback,
-};
-/* The advertised format/modifier table, built at the first bind from what the renderer's driver
- * can import (vkp_dmabuf_modifiers). INVALID is always offered too (Mesa drops it; other clients
- * may use it for the implicit path). Without a renderer the list is LINEAR + INVALID, as before. */
-/* The last two rows are HDR10's (banner_color.h): A2B10G10R10 as AB30 (alpha) + XB30 (opaque) - Mesa
- * lists a VkFormat only when both are advertised, and it is the one 10-bit layout our zero-copy WSI
- * can put in a gralloc buffer (AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM). They are advertised ONLY
- * while the HDR gate is open, and after the 8-bit rows, so every other session - and every client that
- * takes the first format it sees - gets exactly the table it always had. */
-#define DMABUF_NFMT_MAX 6
-#define DMABUF_NFMT_SDR 4
-#define DMABUF_NMOD 4
-#define DRM_ABGR2101010 FOURCC('A', 'B', '3', '0')
-#define DRM_XBGR2101010 FOURCC('X', 'B', '3', '0')
-static struct { uint32_t fmt; uint64_t mods[DMABUF_NMOD]; int n; } g_dmabuf_fmts[DMABUF_NFMT_MAX] = {
-    {DRM_ARGB8888}, {DRM_XRGB8888}, {DRM_ABGR8888}, {DRM_XBGR8888}, {DRM_ABGR2101010}, {DRM_XBGR2101010}};
-static int g_dmabuf_nfmt = DMABUF_NFMT_SDR;   /* rows advertised: the SDR four, + 2 with the HDR gate open */
-static int g_dmabuf_fmts_ready;
-static void dmabuf_build_feedback(void);
-
-static void dmabuf_build_formats(void) {
-    char line[320];
-    int pos = 0, compressed = 0;
-    g_dmabuf_fmts_ready = 1;
-    g_dmabuf_nfmt = banner_color_hdr_open() ? DMABUF_NFMT_MAX : DMABUF_NFMT_SDR;
-    for (int f = 0; f < g_dmabuf_nfmt; f++) {
-        uint64_t got[DMABUF_NMOD];
-        int n = vkp_dmabuf_modifiers(g_dmabuf_fmts[f].fmt, got, DMABUF_NMOD), k = 0;
-        /* LINEAR first: it is the layout every client and the shm fallback agree on, and the one
-         * we advertised before this table existed. */
-        g_dmabuf_fmts[f].mods[k++] = MOD_LINEAR;
-        for (int i = 0; i < n && k < DMABUF_NMOD - 1; i++) {
-            if (got[i] == MOD_LINEAR) continue;
-            if (got[i] == VKP_MOD_QCOM_COMPRESSED && !g_ubwc) continue;
-            g_dmabuf_fmts[f].mods[k++] = got[i];
-            if (got[i] == VKP_MOD_QCOM_COMPRESSED) compressed++;
-        }
-        g_dmabuf_fmts[f].mods[k++] = MOD_INVALID;
-        g_dmabuf_fmts[f].n = k;
-        uint32_t fmt = g_dmabuf_fmts[f].fmt;
-        pos += snprintf(line + pos, sizeof(line) - (size_t)pos, "%s%c%c%c%c", f ? ", " : "",
-                        fmt & 0xff, (fmt >> 8) & 0xff, (fmt >> 16) & 0xff, (fmt >> 24) & 0xff);
-        for (int i = 0; i < k - 1 && pos < (int)sizeof(line); i++)
-            pos += snprintf(line + pos, sizeof(line) - (size_t)pos, "%s%s", i ? "+" : " ",
-                            vkp_modifier_name(g_dmabuf_fmts[f].mods[i]));
-        if (pos >= (int)sizeof(line)) pos = (int)sizeof(line) - 1;
-    }
-    banner_log("dmabuf", "formats: %s%s", line,
-               !g_ubwc ? " (BANNER_WAYLAND_UBWC=0: qcom_compressed not advertised)" : "");
-    if (g_ubwc && !compressed)
-        banner_log("dmabuf", "the compositor's driver (%s) reports no importable qcom_compressed layout: "
-                   "game swapchains stay linear", vkp_gpu_name());
-    if (g_dmabuf_nfmt > DMABUF_NFMT_SDR) {
-        /* The rows above always carry LINEAR; say what the compositor's own driver can really import
-         * for 10-bit, since a gralloc buffer it cannot import is shown on the display layer only. */
-        uint64_t got[DMABUF_NMOD];
-        int n = vkp_dmabuf_modifiers(DRM_XBGR2101010, got, DMABUF_NMOD), ubwc10 = 0;
-        for (int i = 0; i < n; i++) if (got[i] == VKP_MOD_QCOM_COMPRESSED) ubwc10 = 1;
-        banner_log("color", "10-bit dma-buf formats AB30/XB30 advertised for HDR10; the compositor's driver (%s) "
-                   "imports XB30 %s", vkp_gpu_name(),
-                   n == 0 ? "with no layout it reports (copy path unlikely; display layer only)"
-                          : ubwc10 ? "linear and UBWC" : "linear only (UBWC 10-bit frames: display layer only)");
-    }
-    dmabuf_build_feedback();
-}
-
-/* ---- dmabuf feedback (zwp_linux_dmabuf_v1 version 4)
- *
- * Turnip's Vulkan WSI is happy with the version 3 format/modifier events, so every Vulkan game
- * worked while we only advertised 3. Mesa's EGL is not: its Wayland platform only takes the GPU
- * (kopper/Zink) path when it can bind this interface with FEEDBACK, and with 3 it silently drops
- * to its wl_shm software path. On this Proton layer that path has no software rasteriser to fall
- * back to (the gallium build is zink+kopper+swrast, no llvmpipe), so the shm buffer it commits is
- * never written: a native OpenGL window came out solid black, ~30 shm commits/s and no GPU frame
- * at all (Wizardry: The Labyrinth of Lost Souls). Feedback is what makes that path work.
- *
- * What a client needs from us is one tranche describing "everything the compositor can import":
- * a format table it mmaps read-only, the device to allocate on, and the indices it may use.
- * Clients binding versions 1-3 keep getting the old format/modifier events instead. */
-
-#ifndef MFD_CLOEXEC
-#define MFD_CLOEXEC 0x0001U
-#endif
-#ifndef MFD_ALLOW_SEALING
-#define MFD_ALLOW_SEALING 0x0002U
-#endif
-#ifndef F_ADD_SEALS
-#define F_ADD_SEALS 1033
-#define F_SEAL_SEAL 0x0001
-#define F_SEAL_SHRINK 0x0002
-#define F_SEAL_GROW 0x0004
-#define F_SEAL_WRITE 0x0008
-#endif
-
-struct dmabuf_fmt_entry { uint32_t format; uint32_t pad; uint64_t modifier; }; /* the wire layout */
-
-static int g_fmt_table_fd = -1;         /* sealed read-only memfd of dmabuf_fmt_entry[] */
-static size_t g_fmt_table_size;
-static uint16_t g_fmt_table_n;          /* entries, == the indices a tranche may name */
-static dev_t g_main_device;             /* the render node clients should allocate on */
-
-/* The GPU we import through is reached with KGSL, not DRM, so there is no render node of our own
- * to name. Clients only use main_device to match "the same device as the compositor" and to pick
- * a driver; the one DRM render node this platform has is the right answer, and Zink ignores it
- * anyway (it renders on the Vulkan device it already has). 0 if the platform has none. */
-static dev_t dmabuf_render_node(void) {
-    static const char *nodes[] = {"/dev/dri/renderD128", "/dev/dri/renderD129", "/dev/dri/card0"};
-    struct stat st;
-    if (g_no_render_node) return 0;
-    for (size_t i = 0; i < sizeof(nodes) / sizeof(nodes[0]); i++)
-        if (!stat(nodes[i], &st) && S_ISCHR(st.st_mode)) return st.st_rdev;
-    return 0;
-}
-
-static void dmabuf_build_feedback(void) {
-    struct dmabuf_fmt_entry entries[DMABUF_NFMT_MAX * DMABUF_NMOD];
-    int n = 0;
-
-    g_main_device = dmabuf_render_node();
-    for (int f = 0; f < g_dmabuf_nfmt; f++)
-        for (int m = 0; m < g_dmabuf_fmts[f].n; m++) {
-            if (g_dmabuf_fmts[f].mods[m] == MOD_INVALID) continue; /* never offer INVALID here */
-            entries[n].format = g_dmabuf_fmts[f].fmt;
-            entries[n].pad = 0;
-            entries[n].modifier = g_dmabuf_fmts[f].mods[m];
-            n++;
-        }
-    if (!n) return;
-
-    int fd = (int)syscall(__NR_memfd_create, "banner-dmabuf-formats",
-                          MFD_CLOEXEC | MFD_ALLOW_SEALING);
-    if (fd < 0) { WLOGE("dmabuf feedback: memfd_create failed (%s)", strerror(errno)); return; }
-    size_t size = (size_t)n * sizeof(entries[0]);
-    if (write(fd, entries, size) != (ssize_t)size) {
-        WLOGE("dmabuf feedback: could not write the format table (%s)", strerror(errno));
-        close(fd);
-        return;
-    }
-    /* The client mmaps this read-only and trusts it not to change under it. */
-    fcntl(fd, F_ADD_SEALS, F_SEAL_SEAL | F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE);
-    g_fmt_table_fd = fd;
-    g_fmt_table_size = size;
-    g_fmt_table_n = (uint16_t)n;
-    banner_log("dmabuf", "feedback ready: %d format/modifier pairs, main device %u:%u",
-               n, (unsigned)major(g_main_device), (unsigned)minor(g_main_device));
-    /* Vulkan games never need the node. Mesa's EGL did until Wayland layer versionCode 9: without
-     * one it fell back to a software path that draws nothing here (black window, sound plays). */
-    if (!g_main_device)
-        banner_log("dmabuf", "%s: OpenGL games need Wayland layer versionCode 9 or newer, "
-                   "which runs OpenGL on the GPU without a DRM node; older layers show a black window",
-                   g_no_render_node ? "no DRM device named (forced by BANNER_WAYLAND_NO_RENDER_NODE=1)"
-                                    : "this device gives apps no display (DRM) device (/dev/dri)");
-}
-
-/* One tranche: our device, every pair in the table, no scanout flag. */
-static void dmabuf_feedback_send(struct wl_resource *fb) {
-    struct wl_array dev, idx;
-    uint16_t *ind;
-
-    if (g_fmt_table_fd < 0) { zwp_linux_dmabuf_feedback_v1_send_done(fb); return; }
-
-    zwp_linux_dmabuf_feedback_v1_send_format_table(fb, g_fmt_table_fd, (uint32_t)g_fmt_table_size);
-
-    wl_array_init(&dev);
-    memcpy(wl_array_add(&dev, sizeof(dev_t)), &g_main_device, sizeof(dev_t));
-    zwp_linux_dmabuf_feedback_v1_send_main_device(fb, &dev);
-    zwp_linux_dmabuf_feedback_v1_send_tranche_target_device(fb, &dev);
-    wl_array_release(&dev);
-
-    wl_array_init(&idx);
-    ind = wl_array_add(&idx, (size_t)g_fmt_table_n * sizeof(uint16_t));
-    if (ind) for (uint16_t i = 0; i < g_fmt_table_n; i++) ind[i] = i;
-    zwp_linux_dmabuf_feedback_v1_send_tranche_formats(fb, &idx);
-    wl_array_release(&idx);
-
-    zwp_linux_dmabuf_feedback_v1_send_tranche_flags(fb, 0);
-    zwp_linux_dmabuf_feedback_v1_send_tranche_done(fb);
-    zwp_linux_dmabuf_feedback_v1_send_done(fb);
-}
-
-static void dmabuf_feedback_destroy(struct wl_client *c, struct wl_resource *r) {
-    wl_resource_destroy(r);
-}
-static const struct zwp_linux_dmabuf_feedback_v1_interface dmabuf_feedback_impl = {
-    .destroy = dmabuf_feedback_destroy,
-};
-
-static void dmabuf_new_feedback(struct wl_client *c, struct wl_resource *parent, uint32_t id) {
-    struct wl_resource *fb = wl_resource_create(c, &zwp_linux_dmabuf_feedback_v1_interface,
-                                                wl_resource_get_version(parent), id);
-    if (!fb) { wl_client_post_no_memory(c); return; }
-    wl_resource_set_implementation(fb, &dmabuf_feedback_impl, NULL, NULL);
-    if (!g_dmabuf_fmts_ready) dmabuf_build_formats();
-    dmabuf_feedback_send(fb);
-}
-
-static void dmabuf_get_default_feedback(struct wl_client *c, struct wl_resource *r, uint32_t id) {
-    struct client_info *ci = client_info_of(c);
-    if (ci) ci->asked_feedback = 1;
-    dmabuf_new_feedback(c, r, id);
-}
-/* Per-surface feedback would let us hint a different tranche for a window on its own display
- * layer; we have nothing better to say per surface, so it is the default one. */
-static void dmabuf_get_surface_feedback(struct wl_client *c, struct wl_resource *r, uint32_t id,
-                                        struct wl_resource *surface) {
-    dmabuf_new_feedback(c, r, id);
-}
-
-static void bind_dmabuf(struct wl_client *c, void *data, uint32_t ver, uint32_t id) {
-    struct wl_resource *r = wl_resource_create(c, &zwp_linux_dmabuf_v1_interface, ver, id);
-    wl_resource_set_implementation(r, &dmabuf_impl, NULL, NULL);
-    if (!g_dmabuf_fmts_ready) dmabuf_build_formats();
-    /* From version 4 the format and modifier events are gone: the client asks for feedback
-     * instead, and sending both would only confuse it about which list is authoritative. */
-    if (ver >= 4) return;
-    for (int f = 0; f < g_dmabuf_nfmt; f++) {
-        zwp_linux_dmabuf_v1_send_format(r, g_dmabuf_fmts[f].fmt);
-        if (ver >= 3)
-            for (int m = 0; m < g_dmabuf_fmts[f].n; m++)
-                zwp_linux_dmabuf_v1_send_modifier(r, g_dmabuf_fmts[f].fmt,
-                                                  (uint32_t)(g_dmabuf_fmts[f].mods[m] >> 32),
-                                                  (uint32_t)(g_dmabuf_fmts[f].mods[m] & 0xffffffff));
-    }
-}
-
 /* ------------------------------------------------------------------ wl_output */
 
 /* wl_output v3+ has a request (release); without an implementation the first client to send it
@@ -2041,6 +1796,17 @@ static void note_hdr_unimported(const struct draw_list *dl, struct surface *s, i
     g_hdr_unimported_below = dl->n;
 }
 
+/* A client that describes opaque regions can intentionally leave part of an alpha buffer see-through.
+ * Gamescope uses this for its full-size Steam notification and overlay planes. */
+static int surface_translucent(const struct surface *s, int w, int h) {
+    if (!s->buf_alpha) return 0;
+    const struct client_info *ci = client_info_of(wl_resource_get_client(s->resource));
+    if (!ci || !ci->declares_opaque) return 0;
+    const int *o = s->opaque;
+    return !(o[2] > 0 && o[0] <= 0 && o[1] <= 0 &&
+             (long long)o[0] + o[2] >= w && (long long)o[1] + o[3] >= h);
+}
+
 static void add_surface(struct draw_list *dl, struct surface *s, int ox, int oy) {
     struct vkp_image *img = surface_image(s);
     float sx = 0, sy = 0, sw = (float)s->buf_w, sh = (float)s->buf_h;
@@ -2060,7 +1826,8 @@ static void add_surface(struct draw_list *dl, struct surface *s, int ox, int oy)
         dl->d = d;
         dl->cap = cap;
     }
-    dl->d[dl->n++] = (struct vkp_draw){img, sx, sy, sw, sh, ox, oy, dw, dh};
+    dl->d[dl->n++] = (struct vkp_draw){img, sx, sy, sw, sh, ox, oy, dw, dh,
+                                      surface_translucent(s, dw, dh)};
     s->drawn = 1;
 }
 
@@ -2131,6 +1898,7 @@ static int on_frame_timer(void *data) {
 static int layer_candidate(const struct draw_list *dl, int scene_w, int scene_h) {
     for (int i = dl->n - 1; i >= 0 && i >= dl->n - 2; i--) {
         const struct vkp_draw *d = &dl->d[i];
+        if (d->blend) continue; /* the translucent plane must not replace the opaque game layer */
         if (!vkp_image_is_dmabuf(d->img)) continue;
         if (d->dx != 0 || d->dy != 0 || d->dw != scene_w || d->dh != scene_h) continue;
         if (d->sx != 0 || d->sy != 0 || (int)d->sw != vkp_image_width(d->img) ||
@@ -2469,7 +2237,7 @@ static void render_scene(void) {
              * its own layer, cropped and placed by the display. */
             int go[8], ov = 0;
             if (over == 1 && li >= 0 && vkp_map_draw(&dl.d[li + 1], go))
-                ov = sc_layer_present_overlay(dl.d[li + 1].img, go) == 0 ? 1 : -1;
+                ov = sc_layer_present_overlay(dl.d[li + 1].img, go, dl.d[li + 1].blend) == 0 ? 1 : -1;
             if (ov <= 0) sc_layer_hide_overlay();
             if (ov < 0) { /* the overlay layer refused it: draw the whole scene the old way */
                 sc_layer_hide();
@@ -2595,6 +2363,16 @@ static void pointer_set_cursor(struct wl_client *c, struct wl_resource *r, uint3
     g_cursor_surface = s;
     g_cursor_hx = hx;
     g_cursor_hy = hy;
+    /* Its content may already be committed: wlroots' Wayland backend attaches and commits the
+     * cursor surface first and sets it as the pointer after, and sets it again with nothing new
+     * committed each time the pointer re-enters. */
+    struct wl_resource *buffer = surface_take_idle(s);
+    if (buffer) {
+        cursor_publish_buffer(s, buffer);
+        wl_buffer_send_release(buffer);
+    } else if (g_cursor_shown == s) {
+        cursor_publish_shown();
+    }
 }
 static void pointer_release(struct wl_client *c, struct wl_resource *r) { wl_resource_destroy(r); }
 static const struct wl_pointer_interface pointer_impl = {
@@ -2742,8 +2520,8 @@ static void keyboard_focus(struct wl_resource *target) {
         if (sk->focus == target) continue;
         sk->focus = target;
         wl_keyboard_send_enter(sk->kb, wl_display_next_serial(g_display), target, &keys);
-        /* Baseline modifiers = none; Shift/Ctrl arrive as their own key events. */
-        wl_keyboard_send_modifiers(sk->kb, wl_display_next_serial(g_display), 0, 0, 0, 0);
+        wl_keyboard_send_modifiers(sk->kb, wl_display_next_serial(g_display),
+                                   g_mods_depressed, 0, g_mods_locked, 0);
     }
     wl_array_release(&keys);
     banner_clipboard_keyboard_focus(client); /* wl_data_device selection follows focus */
@@ -3440,7 +3218,34 @@ static void scroll_event(int steps) {
     wl_display_flush_clients(g_display);
 }
 
+/* Folds a key into the modifier state; returns whether the state changed. */
+static int update_modifiers(uint32_t evdev, int pressed) {
+    static const struct { uint32_t evdev, mask; } mod_keys[] = {
+        { 42, 0x1 }, { 54, 0x1 },     /* Shift L/R */
+        { 29, 0x4 }, { 97, 0x4 },     /* Control L/R */
+        { 56, 0x8 }, { 100, 0x8 },    /* Alt L/R, both Mod1 in this keymap */
+        { 125, 0x40 }, { 126, 0x40 }, /* Super L/R */
+    };
+    uint32_t depressed = g_mods_depressed, locked = g_mods_locked;
+    if (evdev == 58) { /* Caps Lock toggles on press */
+        if (pressed) locked ^= 0x2;
+    } else {
+        int i, n = (int)(sizeof(mod_keys) / sizeof(mod_keys[0]));
+        for (i = 0; i < n && mod_keys[i].evdev != evdev; i++) {}
+        if (i == n) return 0;
+        if (pressed) g_mod_keys_held |= 1u << i; else g_mod_keys_held &= ~(1u << i);
+        depressed = 0;
+        for (int j = 0; j < n; j++) if (g_mod_keys_held & (1u << j)) depressed |= mod_keys[j].mask;
+    }
+    if (depressed == g_mods_depressed && locked == g_mods_locked) return 0;
+    g_mods_depressed = depressed;
+    g_mods_locked = locked;
+    return 1;
+}
+
 static void key_event(uint32_t evdev, int pressed) {
+    /* Tracked even with nothing to deliver to, so a Shift released unseen is not left held. */
+    int mods_changed = update_modifiers(evdev, pressed);
     /* Keys go to the program window the user last clicked (else the topmost non-shell window),
      * never to Wine's desktop surface: winewayland hands each key to the hwnd of the surface that
      * holds keyboard focus, and a key handed to explorer's desktop hwnd is queued to explorer's
@@ -3460,9 +3265,13 @@ static void key_event(uint32_t evdev, int pressed) {
     struct seat_keyboard *sk;
     if (!keyboard_for(client)) return;
     keyboard_focus(target->resource);
-    for_each_keyboard_of(client, sk)
+    for_each_keyboard_of(client, sk) {
         wl_keyboard_send_key(sk->kb, wl_display_next_serial(g_display), now_ms(), evdev,
                              pressed ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED);
+        if (mods_changed)
+            wl_keyboard_send_modifiers(sk->kb, wl_display_next_serial(g_display),
+                                       g_mods_depressed, 0, g_mods_locked, 0);
+    }
     wl_display_flush_clients(g_display);
 }
 

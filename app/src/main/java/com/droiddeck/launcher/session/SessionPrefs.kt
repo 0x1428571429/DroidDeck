@@ -21,6 +21,13 @@ object SessionPrefs {
 
     private fun prefs(context: Context) = context.getSharedPreferences("session", Context.MODE_PRIVATE)
 
+    /** Whether the launcher hides Android's status and navigation bars. */
+    fun launcherFullscreen(context: Context): Boolean = prefs(context).getBoolean("launcherFullscreen", true)
+
+    fun setLauncherFullscreen(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("launcherFullscreen", on).apply()
+    }
+
     fun hudEnabled(context: Context): Boolean = prefs(context).getBoolean("hud", true)
 
     fun setHudEnabled(context: Context, on: Boolean) {
@@ -204,6 +211,22 @@ object SessionPrefs {
         prefs(context).edit().putBoolean("prootNoSeccomp", on).apply()
     }
 
+    const val DEFAULT_GUEST_HOSTNAME = "DroidDeck"
+
+    @JvmStatic
+    fun guestHostname(context: Context): String =
+        validGuestHostname(prefs(context).getString("guestHostname", null)) ?: DEFAULT_GUEST_HOSTNAME
+
+    fun setGuestHostname(context: Context, name: String) {
+        val valid = validGuestHostname(name)
+        prefs(context).edit().apply { if (valid == null) remove("guestHostname") else putString("guestHostname", valid) }.apply()
+    }
+
+    fun validGuestHostname(name: String?): String? {
+        val trimmed = name?.trim() ?: return null
+        return trimmed.takeIf { Regex("[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?").matches(it) }
+    }
+
     /** Turnip's sysmem rendering (TU_DEBUG=sysmem) for the runtime's driver: bypasses GMEM tiling. */
     fun tuSysmem(context: Context): Boolean = prefs(context).getBoolean("tuSysmem", false)
 
@@ -225,7 +248,7 @@ object SessionPrefs {
     fun noGlError(context: Context): Boolean = prefs(context).getBoolean("noGlError", true)
     fun setNoGlError(context: Context, on: Boolean) { prefs(context).edit().putBoolean("noGlError", on).apply() }
 
-    /** `steam -steamdeck -steamos3`: the client as SteamOS runs it. Expects Deck hardware; untested. */
+    /** Runs the SteamOS gamepad client with its Quick Access performance controls. */
     fun steamDeckMode(context: Context): Boolean = prefs(context).getBoolean("steamDeckMode", false)
     fun setSteamDeckMode(context: Context, on: Boolean) { prefs(context).edit().putBoolean("steamDeckMode", on).apply() }
 
@@ -291,6 +314,8 @@ object SessionPrefs {
 
     fun setFexPreset(context: Context, id: String) {
         prefs(context).edit().putString("fexPreset", id).apply()
+        runCatching { GameEnvironmentStore.publish(context) }
+            .onFailure { android.util.Log.e("GameEnvironment", "Could not update game environment", it) }
     }
 
     /** The Steam client branch forced on the command line: "publicbeta" (every session so far) or "steamdeck_publicbeta" (Armada's). */
@@ -304,6 +329,13 @@ object SessionPrefs {
 
     fun setSteamChannel(context: Context, id: String) {
         prefs(context).edit().putString("steamChannel", id).apply()
+    }
+
+    /** Whether opening DroidDeck starts a Steam session instead of showing the front end. */
+    fun runSteamAtStartup(context: Context): Boolean = prefs(context).getBoolean("runSteamAtStartup", false)
+
+    fun setRunSteamAtStartup(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("runSteamAtStartup", on).apply()
     }
 
     /**
@@ -336,8 +368,8 @@ object SessionPrefs {
         prefs(context).edit().putString("addedExe:$folderPath", path).apply()
     }
 
-    /** The app's colour theme (ui/Themes ids); Paper on black unless chosen otherwise. */
-    fun theme(context: Context): String = prefs(context).getString("theme", "paper") ?: "paper"
+    /** The app's colour theme (ui/Themes ids); Graphite unless chosen otherwise. */
+    fun theme(context: Context): String = prefs(context).getString("theme", "graphite") ?: "graphite"
 
     fun setTheme(context: Context, id: String) {
         prefs(context).edit().putString("theme", id).apply()

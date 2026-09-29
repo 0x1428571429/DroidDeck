@@ -41,7 +41,8 @@ fi
 
 ndk_version=${DROIDDECK_NDK_VERSION:-}
 if [[ -z "${ndk_version}" ]]; then
-    ndk_path=$(find "${sdk_dir}/ndk" -mindepth 1 -maxdepth 1 -type d -print | sort -V | tail -1)
+    # Only complete NDKs: an interrupted sdkmanager install leaves a directory without source.properties.
+    ndk_path=$(find "${sdk_dir}/ndk" -mindepth 2 -maxdepth 2 -name source.properties -print | xargs -n1 dirname | sort -V | tail -1)
     ndk_version=${ndk_path##*/}
 fi
 if [[ -z "${ndk_version}" || ! -d "${sdk_dir}/ndk/${ndk_version}" ]]; then
@@ -100,7 +101,7 @@ docker run --rm --platform linux/amd64 \
         d=app/src/main/assets/linuxfs
         mkdir -p "$d"
         aarch64-linux-gnu-g++ -shared -fPIC -O2 -Wall -Wno-attributes -Wno-nonnull-compare \
-            -pthread -std=c++17 -static-libstdc++ -static-libgcc \
+            -pthread -std=c++17 -static-libstdc++ -static-libgcc -Wl,--exclude-libs,ALL \
             -o "$d/libfakeinput.so" app/src/main/cpp/fakeinput_steam.cpp -ldl
         aarch64-linux-gnu-strip --strip-unneeded "$d/libfakeinput.so"
         aarch64-linux-gnu-gcc -shared -fPIC -O2 -Wall -pthread \
@@ -310,6 +311,29 @@ grep -qi 'CN=Android, OU=Android, O=Android' <<<"${signature_output}" || {
     echo "APK signature check failed: the signer is not the AOSP testkey." >&2
     exit 1
 }
+
+# With DroidDeck's own key at hand, sign as CI's main builds are (tools/release/sign-apk.sh), so
+# the apk installs over a release instead of being refused as a different signer. The key's
+# location and password live in an untracked .signing.env (RELEASE_KEYSTORE, RELEASE_STORE_PASSWORD,
+# RELEASE_KEY_ALIAS), looked for in this checkout and then in the main one, which worktrees share.
+signing_env=${DROIDDECK_SIGNING_ENV:-}
+if [[ -z "${signing_env}" ]]; then
+    for candidate in "${repo_root}/.signing.env" \
+            "$(dirname "$(git -C "${repo_root}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo .)")/.signing.env"; do
+        [[ -f "${candidate}" ]] && { signing_env=${candidate}; break; }
+    done
+fi
+if [[ -n "${signing_env}" ]]; then
+    echo "Signing with DroidDeck's key (${signing_env})"
+    (
+        set -a
+        # shellcheck disable=SC1090
+        . "${signing_env}"
+        set +a
+        BUILD_TOOLS="${build_tools}" "${repo_root}/tools/release/sign-apk.sh" "${apk}" standard "${apk}.release"
+    )
+    mv "${apk}.release" "${apk}"
+fi
 
 printf 'APK: %s\n' "${apk}"
 printf 'SHA-256: '

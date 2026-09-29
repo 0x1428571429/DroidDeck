@@ -19,7 +19,10 @@ if [ -n "${BL_LOG:-}" ] && [ -z "${BL_INSIDE:-}" ]; then
   if [ "$(stat -c %s "$BL_LOG" 2>/dev/null || echo 0)" -gt 8388608 ]; then
     mv -f "$BL_LOG" "$BL_LOG.1"
   fi
-  exec >>"$BL_LOG" 2>&1
+  # A guest looping on an error writes gigabytes in minutes (an Xwayland proot had lost track of
+  # managed 9 GB of one line in 19 min): the log keeps its first BL_LOG_CAP bytes and the rest is
+  # drained, not refused - a writer that filled it must not die of SIGPIPE.
+  exec > >({ head -c "${BL_LOG_CAP:-268435456}" >>"$BL_LOG"; cat >/dev/null; }) 2>&1
   echo "== bannerlator-session $(date) mode=$mode $*"
   echo "== uid=$(id -u) size=${BL_WIDTH:-?}x${BL_HEIGHT:-?} fps=${BL_FPS:-0} icd=${VK_ICD_FILENAMES:-none}"
   echo "== gamescope: $(gamescope --version 2>&1 | head -1) at $(command -v gamescope)"
@@ -321,18 +324,35 @@ case $mode in
       # in yet - so the install dialog only appeared after the user restarted the client by hand.
       # With no remembered sign-in, ask again once the sign-in has happened: the client binary
       # started a second time with a URL hands it to the running instance and exits.
+      #
+      # The request is also dropped while the client is still in its post-logon compat phase (it
+      # probes every registered tool then): with publicbeta 1790380355 that phase took 27 s and a
+      # request sent 15 s after sign-in vanished (2026-09-26, no dialog; 1790121765 was done in
+      # time). So wait for the client to say the phase is over ("Waiting for compat in post-logon
+      # took" in its console log; at most 90 s if it never does), then ask - and ask again, twice
+      # at most, if no install has started a minute later.
       if ! grep -q '"RememberPassword"[[:space:]]*"1"' "$steam_root/config/loginusers.vdf" 2>/dev/null; then
         (
+          _bl_acf="$steam_root/steamapps/appmanifest_4427310.acf"
           _bl_conn="$steam_root/logs/connection_log.txt"
+          _bl_cons="$steam_root/logs/console_log.txt"
           _bl_from=$(stat -c %s "$_bl_conn" 2>/dev/null || echo 0)
+          _bl_cfrom=$(stat -c %s "$_bl_cons" 2>/dev/null || echo 0)
           for _ in $(seq 1 180); do
             sleep 10
-            [ -f "$steam_root/steamapps/appmanifest_4427310.acf" ] && exit 0
+            [ -f "$_bl_acf" ] && exit 0
             if tail -c +$((_bl_from + 1)) "$_bl_conn" 2>/dev/null | grep -q "RecvMsgClientLogOnResponse() : processing complete"; then
-              sleep 15
-              [ -f "$steam_root/steamapps/appmanifest_4427310.acf" ] && exit 0
-              step "signed in: asking the client again for the ARM64 Proton"
-              "$steam_root/steamrtarm64/steam" steam://install/4427310 >/dev/null 2>&1 || true
+              for _ in $(seq 1 45); do
+                tail -c +$((_bl_cfrom + 1)) "$_bl_cons" 2>/dev/null | grep -q "Waiting for compat in post-logon took" && break
+                sleep 2
+              done
+              for _bl_try in 1 2 3; do
+                sleep 10
+                [ -f "$_bl_acf" ] && exit 0
+                step "signed in: asking the client again for the ARM64 Proton (try $_bl_try of 3)"
+                "$steam_root/steamrtarm64/steam" steam://install/4427310 >/dev/null 2>&1 || true
+                sleep 50
+              done
               exit 0
             fi
           done
@@ -490,20 +510,19 @@ BUSCONF
     # desktop's launchers ask for; gamescope shows one window at a time and the game takes over.
     _bl_ui=(-gamepadui)
     [ "${BL_STEAM_UI:-}" = desktop ] && _bl_ui=()
-    # Deck mode (BL_STEAMDECK=1, the Performance page): -steamdeck is the flag that puts the Quick
-    # Access Menu, the performance overlay and the Deck settings pages on screen. Only -steamdeck,
-    # never -steamos3: that one makes the client manage itself as SteamOS does - it calls
-    # steamos-select-branch and opts the install into the steamdeck_stable client branch, writes
-    # that to package/beta, and from then on the branch on disk loses to the -clientbeta below on
-    # every launch; the updater finds "installed version 0", marks an update pending and exits 42
-    # to apply it, which never happens, so the client restarts for ever - under a running game,
-    # taking Steam Input with it each time. (Bannerlator 38996ea1, on device.) The SteamOS helpers
-    # the client calls in this mode are staged as no-op stubs under /usr/bin.
+    # Deck mode (BL_STEAMDECK=1, the Steam page's Client settings): -steamdeck is the flag that puts
+    # the Quick Access Menu and the Deck settings pages on screen; the QAM's performance overlay
+    # controls stay greyed out without -steamos3, as SteamOS and Armada launch it. -steamos3 makes
+    # the client manage itself as SteamOS does - it calls steamos-select-branch and writes
+    # steamdeck_stable to package/beta, and a branch on disk that loses to the -clientbeta below
+    # is an update that never installs: exit 42, a restart, for ever (Bannerlator 38996ea1). The
+    # loop below puts package/beta back before every start. The SteamOS helpers the client calls
+    # in this mode are staged as no-op stubs under /usr/bin.
     if [ "${BL_STEAMDECK:-0}" = 1 ] && [ "${BL_STEAM_UI:-}" != desktop ]; then
-      _bl_ui+=(-steamdeck)
+      _bl_ui+=(-steamdeck -steamos3)
       # The QAM's Scaling Filter lists NVIDIA Image Scaling only when told gamescope has it (it does).
       export STEAM_GAMESCOPE_NIS_SUPPORTED=1
-      echo "== steam: Deck mode on (-steamdeck)"
+      echo "== steam: Deck mode on (-steamdeck -steamos3)"
     fi
     # What a killed session leaves behind. Android ends sessions without warning (backgrounding, the
     # low-memory killer), and the client then finds .crash - opening its update UI on the spinner -
@@ -528,10 +547,31 @@ BUSCONF
     # again on the branch it just wrote.
     steam_channel=${BL_STEAM_CHANNEL:-publicbeta}
     steam_beta=$steam_root/package/beta
+    if [ -n "${BL_ADDED_GAMES:-}" ] && [ -f "$BL_ADDED_GAMES" ]; then
+      bannerlator-steam-games watch "$steam_root" "$BL_ADDED_GAMES" &
+      games_watcher=$!
+    fi
     echo "== steam args: ${_bl_ui[*]} -clientbeta $steam_channel -no-cef-sandbox -cef-force-gpu -cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan $*"
     # An update that cannot install asks for a restart (rc=42) every time; the count is capped so a
     # session can never again loop in silence, which reads as a menu opening and closing by itself.
     steam_updates=0
+    rm -f "$HOME/.bl-stop-requested"
+    if [ -n "${BL_LAUNCH_DIR:-}" ] && [ -d "$BL_LAUNCH_DIR" ]; then
+      rm -f "$BL_LAUNCH_DIR/steam-stop"
+      (
+        while :; do
+          if [ -e "$BL_LAUNCH_DIR/steam-stop" ]; then
+            rm -f "$BL_LAUNCH_DIR/steam-stop"
+            : > "$HOME/.bl-stop-requested"
+            echo "== steam: the app asked for a clean exit"
+            "$steam_root/steamrtarm64/steam" -shutdown >/dev/null 2>&1 || true
+            exit 0
+          fi
+          sleep 0.5
+        done
+      ) &
+      stop_watcher=$!
+    fi
     while :; do
       rm -f "$HOME/.bl-restart-once"
       if [ -f "$steam_beta" ] && [ "$(cat "$steam_beta" 2>/dev/null)" != "$steam_channel" ]; then
@@ -545,6 +585,13 @@ BUSCONF
       rc=$?
       echo "== steam exited rc=$rc"
       collect_steam_logs
+      if [ -n "${BL_ADDED_GAMES:-}" ] && [ -f "$BL_ADDED_GAMES" ]; then
+        bannerlator-steam-shortcuts "$steam_root" "$BL_ADDED_GAMES" || true
+      fi
+      if [ -f "$HOME/.bl-stop-requested" ]; then
+        rm -f "$HOME/.bl-stop-requested" "$HOME/.bl-restart-once"
+        break
+      fi
       # The session asked for this exit (the ARM64 Proton landed): start again, without the URL
       # arguments, which were acted on. Not counted against the update cap.
       if [ -f "$HOME/.bl-restart-once" ]; then
@@ -561,6 +608,14 @@ BUSCONF
       # The URL arguments were acted on the first time; a restart must not repeat them.
       set --
     done
+    if [ -n "${stop_watcher:-}" ]; then
+      kill "$stop_watcher" 2>/dev/null || true
+      wait "$stop_watcher" 2>/dev/null || true
+    fi
+    if [ -n "${games_watcher:-}" ]; then
+      kill "$games_watcher" 2>/dev/null || true
+      wait "$games_watcher" 2>/dev/null || true
+    fi
     if [ -n "${BL_DESKTOP:-}" ]; then
       # Started from the desktop (bannerlator-steam-launch): the desktop's own programs share this
       # script's parent, so reap_orphans - right under gamescope, where everything is the client's -
@@ -580,6 +635,8 @@ BUSCONF
         wait "$decky_supervisor" 2>/dev/null || true
         echo "== Decky: session supervisor stopped"
       fi
+      _bl_jobs=$(jobs -p)
+      [ -n "$_bl_jobs" ] && kill $_bl_jobs 2>/dev/null
       reap_orphans
     fi
     exit "$rc"
