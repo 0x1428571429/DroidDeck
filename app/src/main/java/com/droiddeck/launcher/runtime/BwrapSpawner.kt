@@ -213,6 +213,7 @@ object BwrapSpawner {
         request.optJSONObject("env")?.let { e -> e.keys().forEach { k -> env[k] = e.getString(k) } }
         if (binds.any { it.guest == "/dev" }) gpu(rootfs, root, env)?.forEach { addBind(it) }
         preload(session, rootfs, env).forEach { addBind(it) }
+        browserSandboxes(env)
         return Plan(root, binds, request.optString("cwd", "/").ifEmpty { "/" }, argv, env)
     }
 
@@ -278,6 +279,22 @@ object BwrapSpawner {
     }
 
     private const val PRELOAD_DIR = "/run/droiddeck-preload"
+
+    /**
+     * Browsers sandbox their own children, and neither way works in here. Firefox wants
+     * namespaces and seccomp from the kernel; its content processes died without them (the
+     * desktop sets the same for the runtime's own Firefox). Chromium and Electron apps start
+     * their zygote through Flatpak's portal (zypak's spawn strategy), and the portal refuses:
+     * it knows a Flatpak by /proc/<pid>/root/.flatpak-info, and a proot sandbox's root is the
+     * host's. zypak's older strategy mimics the zygote inside the app's own sandbox instead.
+     */
+    private fun browserSandboxes(env: MutableMap<String, String>) {
+        env.putIfAbsent("ZYPAK_ZYGOTE_STRATEGY_SPAWN", "0")
+        for (name in listOf("MOZ_DISABLE_CONTENT_SANDBOX", "MOZ_DISABLE_GMP_SANDBOX", "MOZ_DISABLE_RDD_SANDBOX",
+                            "MOZ_DISABLE_SOCKET_PROCESS_SANDBOX", "MOZ_DISABLE_UTILITY_SANDBOX")) {
+            env.putIfAbsent(name, "1")
+        }
+    }
 
     /**
      * /proc/cpuinfo without the cores' names. Snapdragon's ARMv9 cores (Cortex-A510/A715/X3) have

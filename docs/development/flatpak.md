@@ -46,6 +46,10 @@ The spawner also adds what the rootfs gives its own programs:
   composited by pixman, where Zink cannot present.
 - **Controllers.** The libraries in the rootfs's `/etc/ld.so.preload` (the session shim and the
   fake evdev reader) go in through `LD_PRELOAD`, with the session's `dev` directory.
+- **Browsers.** Firefox's child sandboxes are switched off (`MOZ_DISABLE_*_SANDBOX`), and
+  Chromium and Electron apps use zypak's mimic strategy (`ZYPAK_ZYGOTE_STRATEGY_SPAWN=0`). The
+  Flatpak portal's Spawn refuses a caller whose `/proc/<pid>/root` holds no `.flatpak-info`,
+  and a proot sandbox's root is the host's.
 - **CPU.** `/proc/cpuinfo` without the cores' part numbers. Snapdragon's ARMv9 cores imply SVE2
   to LLVM, Qualcomm leaves SVE off, and llvmpipe's first shader died with SIGILL.
 
