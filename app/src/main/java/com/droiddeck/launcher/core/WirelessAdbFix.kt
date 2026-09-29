@@ -86,6 +86,15 @@ object WirelessAdbFix {
         }
     }.getOrDefault(address is Inet4Address)
 
+    fun localConnectPort(context: Context): Int? =
+        tlsPortProperty()
+            ?: findConnectPort(context, LOOPBACK)
+
+    private fun tlsPortProperty(): Int? = runCatching {
+        Class.forName("android.os.SystemProperties").getMethod("get", String::class.java)
+            .invoke(null, "service.adb.tls.port") as? String
+    }.getOrNull()?.trim()?.toIntOrNull()?.takeIf { it in 1..65535 }
+
     fun findConnectPort(context: Context, pairedHost: String, timeoutSeconds: Long = 12): Int? {
         val manager = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
         val paired = runCatching { InetAddress.getByName(pairedHost) }.getOrNull() ?: return null

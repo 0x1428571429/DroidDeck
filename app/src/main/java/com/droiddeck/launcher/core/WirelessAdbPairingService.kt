@@ -127,7 +127,7 @@ class WirelessAdbPairingService : Service() {
                 show(Stage.Working("Paired. Connecting…"))
             }
             val result = runCatching {
-                val connectPort = WirelessAdbFix.findConnectPort(this, WirelessAdbFix.LOOPBACK)
+                val connectPort = WirelessAdbFix.localConnectPort(this)
                     ?: error("Paired, but the Wireless debugging port was not found. Keep Wireless debugging on and try again.")
                 main.post { show(Stage.Working("Applying the setting…")) }
                 WirelessAdbFix.setChildProcessLimit(this, WirelessAdbFix.LOOPBACK, connectPort, false)
