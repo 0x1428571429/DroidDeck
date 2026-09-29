@@ -78,17 +78,37 @@ internal fun StorePage(s: FrontEndState, a: FrontEndActions, modifier: Modifier)
     var category by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(s.ready) { StoreState.refresh(ctx) }
     LaunchedEffect(Unit) { StoreState.loadSections() }
-    BackHandler(enabled = openApp != null) { openApp = null }
+    // A pad's focus sits on something the page is about to replace - the tile that opens an app,
+    // a tab's contents - and would be lost with it. Each move says where focus goes next.
+    val ff = LocalFrontFocus.current
+    val inputMode = androidx.compose.ui.platform.LocalInputModeManager.current
+    val tabFocus = remember { List(TABS.size) { androidx.compose.ui.focus.FocusRequester() } }
+    var focusMove by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var lastApp by remember { mutableStateOf<String?>(null) }
+    fun closeApp() { lastApp = openApp; openApp = null; focusMove = "tile" to (focusMove?.second ?: 0) + 1 }
+    fun switchTab(to: Int) { tab = to; focusMove = "tab" to (focusMove?.second ?: 0) + 1 }
+    BackHandler(enabled = openApp != null) { closeApp() }
     val scroll = rememberScrollState()
     LaunchedEffect(openApp, tab) { scroll.scrollTo(0) }
+    LaunchedEffect(focusMove, openApp) {
+        if (inputMode.inputMode != androidx.compose.ui.input.InputMode.Keyboard) return@LaunchedEffect
+        val target = when {
+            openApp != null -> ff?.primary
+            focusMove?.first == "tile" -> lastApp?.let { ff?.items?.get("tile:store:$it") } ?: tabFocus[tab]
+            focusMove?.first == "tab" -> tabFocus[tab]
+            else -> null
+        } ?: return@LaunchedEffect
+        var landed = false
+        focusWithinFrames({ landed }) { target.also { landed = runCatching { it.requestFocus() }.isSuccess } }
+    }
     Column(
         modifier = modifier.verticalScroll(scroll).padding(horizontal = padH, vertical = padV)
-            .bumpers(onPrevious = { if (openApp == null) tab = (tab + TABS.size - 1) % TABS.size },
-                     onNext = { if (openApp == null) tab = (tab + 1) % TABS.size }),
+            .bumpers(onPrevious = { if (openApp == null) switchTab((tab + TABS.size - 1) % TABS.size) },
+                     onNext = { if (openApp == null) switchTab((tab + 1) % TABS.size) }),
     ) {
         val id = openApp
         if (id != null) {
-            AppDetail(s, a, id) { openApp = null }
+            AppDetail(s, a, id) { closeApp() }
             return@Column
         }
         Rise(0) {
@@ -105,7 +125,7 @@ internal fun StorePage(s: FrontEndState, a: FrontEndActions, modifier: Modifier)
         Rise(2) {
             TabStrip(
                 TABS.mapIndexed { i, t -> if (i == 2 && StoreState.installed.isNotEmpty()) "$t · ${StoreState.installed.size}" else t },
-                tab, { tab = it }, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp),
+                tab, { switchTab(it) }, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp), focusRequesters = tabFocus,
             )
         }
         BusyBar()
