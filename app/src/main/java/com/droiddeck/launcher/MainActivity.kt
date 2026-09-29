@@ -172,6 +172,9 @@ class MainActivity : ComponentActivity() {
     private var addedGamesArt by mutableStateOf(true)
     @Volatile private var artFetchRunning = false
     private var addedGames by mutableStateOf<List<com.droiddeck.launcher.ui.AddedGameRow>>(emptyList())
+    private val pickAppImage = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        if (r.resultCode == RESULT_OK) InAppFilePicker.pickedFile(r.data)?.let { com.droiddeck.launcher.store.AppImageState.import(this, it) }
+    }
     private val pickRomsDir = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         if (r.resultCode == RESULT_OK) InAppFilePicker.pickedPath(r.data)?.let { path ->
             SessionPrefs.setRomsDir(this, path)
@@ -327,6 +330,17 @@ class MainActivity : ComponentActivity() {
                         },
                         onEmulator = { e -> launchProgram(e.program) },
                         // A Flatpak app from the store, full screen under gamescope like an emulator.
+                        onImportAppImage = {
+                            pickAppImage.launch(InAppFilePicker.buildIntent(this, listOf("appimage"), "Choose an AppImage"))
+                        },
+                        // An imported AppImage, full screen under gamescope like an emulator.
+                        onAppImage = { dir, name ->
+                            Library.flatpakNames[dir] = name
+                            startActivity(Intent(this, SessionActivity::class.java)
+                                .putExtra(SessionService.EXTRA_MODE, SessionService.MODE_RUN)
+                                .putExtra(SessionService.EXTRA_PROGRAM, com.droiddeck.launcher.runtime.AppImageManager.LAUNCHER)
+                                .putExtra(SessionService.EXTRA_PROGRAM_ARGS, arrayOf(dir)))
+                        },
                         onFlatpakApp = { id, name ->
                             Library.flatpakNames[id] = name
                             startActivity(Intent(this, SessionActivity::class.java)

@@ -1,13 +1,8 @@
 package com.droiddeck.launcher.runtime
 
 import android.content.Context
-import android.os.Environment
 import android.util.Log
 import com.droiddeck.launcher.core.FileUtils
-import com.droiddeck.launcher.core.HostProcess
-import com.droiddeck.launcher.session.OrphanReaper
-import com.droiddeck.launcher.session.SessionFiles
-import com.droiddeck.launcher.session.SessionPrefs
 import org.json.JSONObject
 import java.io.File
 
@@ -91,55 +86,10 @@ object FlatpakManager {
             ?.maxByOrNull { it.first }?.second
     }
 
-    /**
-     * Runs [argv] in the runtime and hands each output line to [onLine]; returns the exit status.
-     * [fakeRoot] is for the package tools, which refuse any uid but 0.
-     */
+    /** Runs [argv] in the runtime, its output also in Download/DroidDeck/flatpak-<verb>.log. */
     private fun runGuest(context: Context, argv: List<String>, fakeRoot: Boolean, onLine: (String) -> Unit): Int {
-        // Everything the command says, beside the session logs (Download/DroidDeck), so a store
-        // problem can be handed over like a session's: flatpak-setup.log, flatpak-install.log...
-        val log = try {
-            val name = "flatpak-" + (argv.getOrNull(2)?.takeIf { argv.getOrNull(1) == HELPER } ?: "setup") + ".log"
-            File(LinuxRuntime.debugLogDir().apply { mkdirs() }, name).printWriter()
-        } catch (e: Exception) { null }
-        log?.println("== ${java.util.Date()} ${argv.joinToString(" ")}")
-        try {
-            return runGuestLogged(context, argv, fakeRoot) { line -> log?.println(line); log?.flush(); onLine(line) }
-        } finally {
-            log?.close()
-        }
-    }
-
-    private fun runGuestLogged(context: Context, argv: List<String>, fakeRoot: Boolean, onLine: (String) -> Unit): Int {
-        val root = LinuxRuntime.rootDir(context)
-        LinuxRuntime.writeAccounts(context)
-        SessionFiles.stage(context, root)
-        val runtimeDir = File(context.filesDir, ".flatpak-rt").apply { mkdirs() }
-        val cmd = LinuxRuntime.prootPrefix(context, root, "/root", fakeRoot)
-        LinuxRuntime.binds(context, null, runtimeDir, Environment.getExternalStorageDirectory(), null)
-            .forEach { cmd.add("-b"); cmd.add(it) }
-        cmd += listOf(
-            "/usr/bin/env", "-i", "HOME=/root", "USER=root", "LANG=C.UTF-8",
-            "PATH=/usr/local/bin:/usr/bin:/bin", "XDG_RUNTIME_DIR=${runtimeDir.path}",
-            "XDG_DATA_HOME=/root/.local/share", "FLATPAK_BWRAP=$BWRAP",
-        )
-        cmd += argv
-        val builder = ProcessBuilder(cmd).directory(root).redirectErrorStream(true)
-        builder.environment().apply {
-            put("PROOT_LOADER", LinuxRuntime.prootLoader(context).path)
-            put("PROOT_TMP_DIR", context.cacheDir.path)
-            if (SessionPrefs.prootNoSeccomp(context)) put("PROOT_NO_SECCOMP", "1")
-            LinuxRuntime.prootLibraryPath(context).takeIf { it.isNotEmpty() }?.let { put("LD_LIBRARY_PATH", it) }
-        }
-        val process = builder.start()
-        val pid = HostProcess.pidOf(process)
-        OrphanReaper.keep(pid)
-        try {
-            process.inputStream.bufferedReader().useLines { lines -> lines.forEach(onLine) }
-            return process.waitFor()
-        } finally {
-            OrphanReaper.release(pid)
-        }
+        val name = "flatpak-" + (argv.getOrNull(2)?.takeIf { argv.getOrNull(1) == HELPER } ?: "setup")
+        return GuestCommand.run(context, argv, fakeRoot, name, onLine)
     }
 
     private inline fun <T> exclusive(what: String, block: () -> T): T? {

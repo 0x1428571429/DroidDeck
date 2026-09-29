@@ -292,6 +292,8 @@ object BwrapSpawner {
      */
     private fun browserSandboxes(env: MutableMap<String, String>) {
         env.putIfAbsent("ZYPAK_ZYGOTE_STRATEGY_SPAWN", "0")
+        // Qt WebEngine is Chromium without zypak: it sets up its own namespace sandbox.
+        env.putIfAbsent("QTWEBENGINE_DISABLE_SANDBOX", "1")
         for (name in listOf("MOZ_DISABLE_CONTENT_SANDBOX", "MOZ_DISABLE_GMP_SANDBOX", "MOZ_DISABLE_RDD_SANDBOX",
                             "MOZ_DISABLE_SOCKET_PROCESS_SANDBOX", "MOZ_DISABLE_UTILITY_SANDBOX")) {
             env.putIfAbsent(name, "1")
@@ -372,6 +374,9 @@ object BwrapSpawner {
         }
         val process = builder.start()
         val pid = HostProcess.pidOf(process)
+        // A sandbox lives exactly as long as its bwrap stand-in, which ends it; a session starting
+        // meanwhile (OrphanReaper) must not take it - an install's extra-data step, say.
+        com.droiddeck.launcher.session.OrphanReaper.keep(pid)
         Log.i(TAG, "sandbox $id pid $pid: ${plan.argv.joinToString(" ")} (${plan.binds.size} binds)")
         synchronized(out) { frame(out, 'P', pid.toString().toByteArray()) }
         // The stand-in going away (Flatpak killed, the session over) ends the sandbox.
@@ -400,6 +405,7 @@ object BwrapSpawner {
             }
         }
         val status = process.waitFor()
+        com.droiddeck.launcher.session.OrphanReaper.release(pid)
         Log.i(TAG, "sandbox $id exited $status")
         runCatching { synchronized(out) { frame(out, 'X', status.toString().toByteArray()) } }
     }

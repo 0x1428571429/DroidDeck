@@ -495,3 +495,62 @@ internal fun InstalledAppsGrid(a: FrontEndActions) {
         }
     }
 }
+
+/**
+ * The user's own AppImages on the Desktop page: an Add button, each one to open, and Remove
+ * (pressed twice, like the store's). The picker, the check and the extraction live elsewhere
+ * (MainActivity, AppImageManager); this only shows them.
+ */
+@Composable
+internal fun AppImagesSection(a: FrontEndActions, runtimeReady: Boolean) {
+    val ctx = LocalContext.current
+    LaunchedEffect(Unit) { com.droiddeck.launcher.store.AppImageState.refresh(ctx) }
+    val state = com.droiddeck.launcher.store.AppImageState
+    val colors = MaterialTheme.colorScheme
+    val pal = LocalPalette.current
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        SectionTitle("AppImages", state.items.size.takeIf { it > 0 }?.toString())
+        Actions {
+            SecondaryButton(if (state.importing != null) "Importing…" else "Add AppImage", enabled = runtimeReady && state.importing == null) { a.onImportAppImage() }
+            if (!runtimeReady) ActionChip("Runtime required", ok = false)
+        }
+        state.importing?.let { name ->
+            Text("$name · ${state.stage ?: "Starting…"}", fontSize = 12.sp, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp))
+        }
+        state.lastError?.let { Note(it) }
+        if (state.items.isEmpty() && state.importing == null && state.lastError == null) {
+            Note("Add an ARM64 (aarch64) AppImage from your storage. It is unpacked into the Linux runtime once, then opens full screen from here or from the desktop's menu.")
+        }
+        state.items.forEach { item ->
+            key(item.id) {
+                var confirm by remember(item.id) { mutableStateOf(false) }
+                LaunchedEffect(confirm) { if (confirm) { kotlinx.coroutines.delay(4000); confirm = false } }
+                val src = remember { MutableInteractionSource() }
+                val hot = rememberHot(src)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth().clip(Shape14).background(colors.surface).border(1.dp, pal.line, Shape14).padding(end = 12.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f).paneItem("tile:appimage:${item.id}").clip(Shape14)
+                            .background(if (hot) pal.signal.copy(alpha = 0.10f) else Color.Transparent)
+                            .border(2.dp, if (hot) pal.signal else Color.Transparent, Shape14)
+                            .hoverable(src).clickable(interactionSource = src, indication = LocalIndication.current, role = Role.Button) { a.onAppImage(item.guestDir, item.name) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
+                        AppIcon(item.icon, item.name, 44)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(item.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(item.comment ?: "AppImage", fontSize = 13.sp, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    SecondaryButton(if (confirm) "Press again to remove" else "Remove", compact = true) {
+                        if (confirm) { confirm = false; com.droiddeck.launcher.store.AppImageState.remove(ctx, item.id) } else confirm = true
+                    }
+                }
+            }
+        }
+    }
+}

@@ -198,6 +198,7 @@ private fun Content(
                     Rise(4) { EmulatorGrid(installed, first = true, onSelect = onSelect) }
                 }
                 Rise(5) { InstalledAppsGrid(a) }
+                Rise(5) { AppImagesSection(a, s.ready) }
                 if (available.isNotEmpty()) {
                     Rise(5) { SectionTitle("Available to install", available.size.toString()) }
                     Rise(6) { EmulatorGrid(available, first = installed.isEmpty(), onSelect = onSelect) }

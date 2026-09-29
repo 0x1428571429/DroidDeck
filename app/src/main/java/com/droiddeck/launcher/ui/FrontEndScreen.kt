@@ -124,6 +124,9 @@ class FrontEndActions(
     val onEmulator: (Library.Emulator) -> Unit,
     /** A Flatpak app by id and name, from the Store. */
     val onFlatpakApp: (String, String) -> Unit = { _, _ -> },
+    /** Pick an AppImage to import; open an imported one by its directory and name. */
+    val onImportAppImage: () -> Unit = {},
+    val onAppImage: (String, String) -> Unit = { _, _ -> },
     val onRom: (Library.Rom) -> Unit,
     val onResume: () -> Unit,
     val onSteamSettings: () -> Unit,
