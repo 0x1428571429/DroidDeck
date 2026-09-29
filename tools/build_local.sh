@@ -89,7 +89,14 @@ linuxfs_replaced=1
 rm -rf -- "${linuxfs_dir}"
 mkdir -p "${linuxfs_dir}"
 
-if ! docker image inspect "${image_name}" >/dev/null 2>&1; then
+# A busy daemon (another container running) can fail one inspect of an image that is there, and
+# the rebuild that follows hangs on the registry's metadata for the base image: ask a few times.
+image_present=0
+for _ in 1 2 3 4 5; do
+    if docker image inspect "${image_name}" >/dev/null 2>&1; then image_present=1; break; fi
+    sleep 2
+done
+if [[ "${image_present}" = 0 ]]; then
     docker build --platform linux/amd64 -t "${image_name}" \
         -f "${repo_root}/tools/local-cross.Dockerfile" "${repo_root}"
 fi
