@@ -25,6 +25,26 @@ from gi.repository import Flatpak, GLib  # noqa: E402
 REMOTE = "flathub"
 
 
+def prepare_rootfs():
+    """Some runtimes (KDE 6.10) ship etc/resolv.conf as a link to /run/host/monitor/resolv.conf.
+    Deploying one, Flatpak removes that link only if GIO reports it existing, and GIO follows it:
+    dangling here, it was left in place and making Flatpak's own link failed ("File exists").
+    With the target present in the rootfs the link resolves and the deploy goes through."""
+    target = "/run/host/monitor/resolv.conf"
+    try:
+        if not os.path.exists(target):
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            try:
+                with open("/etc/resolv.conf", "rb") as src:
+                    data = src.read()
+            except OSError:
+                data = b""
+            with open(target, "wb") as dst:
+                dst.write(data)
+    except OSError as err:
+        emit(e="warning", message="could not prepare %s: %s" % (target, err))
+
+
 def emit(**kw):
     sys.stdout.write(json.dumps(kw) + "\n")
     sys.stdout.flush()
@@ -63,7 +83,11 @@ def transaction(inst):
     def on_operation_error(tr, op, err, details):
         # A runtime extension that fails to install (a missing translation, an unneeded GL
         # driver) is not worth losing the app over; anything else ends the transaction.
-        non_fatal = bool(details & Flatpak.TransactionErrorDetails.NON_FATAL)
+        # FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL is 1; the bindings do not always name it.
+        try:
+            non_fatal = bool(int(details) & 1)
+        except (TypeError, ValueError):
+            non_fatal = False
         emit(e="warning" if non_fatal else "error", message="%s: %s" % (op.get_ref(), err.message))
         if not non_fatal:
             state["error"] = err.message
@@ -79,7 +103,7 @@ def transaction(inst):
     return t, state
 
 
-def run(t, state):
+def run(t, state, report_done=True):
     try:
         t.run(None)
     except GLib.Error as err:
@@ -88,7 +112,8 @@ def run(t, state):
     if state["error"]:
         emit(e="error", message=state["error"])
         return 1
-    emit(e="done")
+    if report_done:
+        emit(e="done")
     return 0
 
 
@@ -111,7 +136,15 @@ def install(app_id):
         return 1
     t, state = transaction(inst)
     t.add_install(REMOTE, "app/%s/%s/%s" % (app_id, arch, branch), None)
-    return run(t, state)
+    rc = run(t, state, report_done=False)
+    # A failure the transaction did not report (an error handler that raised, say) must not read
+    # as an install: the app is there, or it is not.
+    if rc == 0 and app_ref(installation(), app_id) is None:
+        emit(e="error", message="%s did not install; see flatpak-install.log" % app_id)
+        return 1
+    if rc == 0:
+        emit(e="done")
+    return rc
 
 
 def uninstall(app_id):
@@ -175,6 +208,8 @@ def main():
         sys.stderr.write(__doc__ or "usage: bannerlator-flatpak install|uninstall|update|updates [app-id]\n")
         return 2
     cmd, args = sys.argv[1], sys.argv[2:]
+    if cmd in ("install", "update"):
+        prepare_rootfs()
     if cmd == "install" and args:
         return install(args[0])
     if cmd == "uninstall" and args:

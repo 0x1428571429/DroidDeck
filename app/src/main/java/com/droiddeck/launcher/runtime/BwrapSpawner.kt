@@ -294,6 +294,11 @@ object BwrapSpawner {
         env.putIfAbsent("ZYPAK_ZYGOTE_STRATEGY_SPAWN", "0")
         // Qt WebEngine is Chromium without zypak: it sets up its own namespace sandbox.
         env.putIfAbsent("QTWEBENGINE_DISABLE_SANDBOX", "1")
+        // Chromium on Wayland asks the render node the compositor names for its DRM version;
+        // KGSL has none, and the GPU process aborts until Chromium gives up ("GPU process isn't
+        // usable"). Electron picks Wayland from XDG_SESSION_TYPE; with an X server there (every
+        // session has Xwayland) it stays on X11, which works. GTK and Qt go by their own settings.
+        if (env.containsKey("DISPLAY")) env["XDG_SESSION_TYPE"] = "x11"
         for (name in listOf("MOZ_DISABLE_CONTENT_SANDBOX", "MOZ_DISABLE_GMP_SANDBOX", "MOZ_DISABLE_RDD_SANDBOX",
                             "MOZ_DISABLE_SOCKET_PROCESS_SANDBOX", "MOZ_DISABLE_UTILITY_SANDBOX")) {
             env.putIfAbsent(name, "1")
