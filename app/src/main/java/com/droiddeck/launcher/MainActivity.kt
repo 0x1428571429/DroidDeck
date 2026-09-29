@@ -948,6 +948,7 @@ class MainActivity : ComponentActivity() {
         customResolution = SessionPrefs.customResolution(this, mode)
         fexPreset = SessionPrefs.fexPreset(this)
         steamChannel = SessionPrefs.steamChannel(this)
+        steamDeckMode = SessionPrefs.steamDeckMode(this)
         runSteamAtStartup = SessionPrefs.runSteamAtStartup(this)
         addedGamesDirs = SessionPrefs.addedGamesDirs(this)
         refreshAddedGames()
