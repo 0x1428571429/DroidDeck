@@ -107,7 +107,7 @@ fun PerformancePage(
         SettingsGroup("Session fixes") {
             ToggleRow(
                 host, "sysmem", "Turnip: sysmem rendering",
-                "On by default, as in WinNative. Required on Adreno 710/720/722; turn off to try GMEM tiling on other Adreno GPUs.",
+                "Required on Adreno 710/720/722. May fix corruption on other Adreno GPUs, but can reduce performance.",
                 tuSysmem, onChange = onTuSysmem,
             )
             ToggleRow(

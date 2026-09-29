@@ -124,7 +124,7 @@ class MainActivity : ComponentActivity() {
     private var clientOverride by mutableStateOf(false)
     private var clientCores by mutableStateOf<Set<Int>>(emptySet())
     private var gameCores by mutableStateOf<Set<Int>>(emptySet())
-    private var tuSysmem by mutableStateOf(true)
+    private var tuSysmem by mutableStateOf(false)
     private var zinkLazy by mutableStateOf(false)
     private var noXalia by mutableStateOf(true)
     private var gamescopeRealtime by mutableStateOf(false)

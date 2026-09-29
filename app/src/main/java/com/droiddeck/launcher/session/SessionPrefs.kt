@@ -253,7 +253,7 @@ object SessionPrefs {
     }
 
     /** Turnip's sysmem rendering (TU_DEBUG=sysmem) for the runtime's driver: bypasses GMEM tiling. */
-    fun tuSysmem(context: Context): Boolean = prefs(context).getBoolean("tuSysmem", true)
+    fun tuSysmem(context: Context): Boolean = prefs(context).getBoolean("tuSysmem", false)
 
     fun setTuSysmem(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean("tuSysmem", on).apply()
