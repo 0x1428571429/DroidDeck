@@ -51,3 +51,7 @@ Added for Flatpak:
   answer `ENOSYS`. They take paths proot never translated, so libglnx's `open_tree(AT_FDCWD, "/")`
   handed Flatpak a descriptor for the host's root and it tried to create directories there
   (`mkdirat(root): Operation not permitted`); unsupported, libglnx falls back to `openat`.
+- `0011-android-hardlink-denial.patch` - Android's SELinux policy denies apps hard links, so
+  `linkat` fails with `EACCES` and Flatpak could not create its repo (`Creating repo: linkat:
+  Permission denied`). `O_TMPFILE` answers `EOPNOTSUPP`, so libglnx writes a named temporary file
+  and renames it, and a denied link answers `EPERM`, on which ostree's checkout copies instead.
