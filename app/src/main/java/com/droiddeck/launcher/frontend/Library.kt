@@ -163,7 +163,13 @@ object Library {
     )
 
     /** The emulator's name for a program path from the rail ("ARMSX2"), or null. */
-    fun nameForProgram(program: String?): String? = specs.firstOrNull { it.program == program }?.name
+    fun nameForProgram(program: String?): String? =
+        if (program == com.droiddeck.launcher.runtime.FlatpakManager.LAUNCHER) {
+            com.droiddeck.launcher.session.SessionState.programArgs.firstOrNull()?.let { flatpakNames[it] ?: it.substringAfterLast('.') }
+        } else specs.firstOrNull { it.program == program }?.name
+
+    /** Flatpak apps' names by id, as they were launched: the session only knows the id. */
+    val flatpakNames = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /**
      * Whether a program from the rail runs at the panel's own resolution rather than the session's

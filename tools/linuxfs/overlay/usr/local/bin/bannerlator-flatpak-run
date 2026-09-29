@@ -1,0 +1,23 @@
+#!/bin/bash
+# A Flatpak app from the front end, full screen under gamescope like an emulator:
+#   bannerlator-flatpak-run <app-id> [args...]
+set -u
+export FLATPAK_BWRAP=/usr/local/bin/bannerlator-bwrap
+case ":${XDG_DATA_DIRS:-}:" in
+  *"/flatpak/exports/share:"*) ;;
+  *) export XDG_DATA_DIRS=$HOME/.local/share/flatpak/exports/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share} ;;
+esac
+# gamescope manages X windows. Flatpak would hand an app the app's own Wayland socket instead (it
+# finds wayland-0 in the runtime directory even with WAYLAND_DISPLAY unset), and the window would
+# open behind gamescope - or not at all, with SDL told to use X11. So under gamescope: X11 only.
+socket=()
+if [ -n "${BL_INSIDE:-}" ]; then
+  unset WAYLAND_DISPLAY
+  socket=(--nosocket=wayland --socket=x11)
+fi
+echo "== flatpak run ${socket[*]} $*"
+# Apps expect a session bus (settings, portals, single-instance checks); a run mode has none.
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-run-session >/dev/null 2>&1; then
+  exec dbus-run-session -- flatpak run "${socket[@]}" "$@"
+fi
+exec flatpak run "${socket[@]}" "$@"

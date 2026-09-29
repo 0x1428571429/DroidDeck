@@ -154,6 +154,11 @@ private fun Content(
         SteamHome(s, a, modifier)
         return
     }
+    // The Store scrolls and navigates inside itself (its tabs and an app's page).
+    if (selected == "store") {
+        StorePage(s, a, modifier)
+        return
+    }
     // The Games tab lays out its own list and detail.
     if (selected == "games" || selected.startsWith("app:")) {
         GamesPage(s, a, selected, onSelect, modifier)

@@ -326,6 +326,14 @@ class MainActivity : ComponentActivity() {
                                 .putExtra(SessionService.EXTRA_MODE, SessionService.MODE_DESKTOP))
                         },
                         onEmulator = { e -> launchProgram(e.program) },
+                        // A Flatpak app from the store, full screen under gamescope like an emulator.
+                        onFlatpakApp = { id, name ->
+                            Library.flatpakNames[id] = name
+                            startActivity(Intent(this, SessionActivity::class.java)
+                                .putExtra(SessionService.EXTRA_MODE, SessionService.MODE_RUN)
+                                .putExtra(SessionService.EXTRA_PROGRAM, com.droiddeck.launcher.runtime.FlatpakManager.LAUNCHER)
+                                .putExtra(SessionService.EXTRA_PROGRAM_ARGS, arrayOf(id)))
+                        },
                         onRom = { g ->
                             val e = emulatorList.first { it.id == g.emulatorId }
                             startActivity(Intent(this, SessionActivity::class.java)
@@ -1005,7 +1013,8 @@ class MainActivity : ComponentActivity() {
         logsEnabled = SessionPrefs.logsEnabled(this)
         runningLabel = if (SessionState.running) when (SessionState.mode) {
             SessionService.MODE_DESKTOP -> "Desktop"
-            SessionService.MODE_RUN -> SessionState.program?.substringAfterLast('/')?.substringBefore('.') ?: "Program"
+            SessionService.MODE_RUN -> Library.nameForProgram(SessionState.program)
+                ?: SessionState.program?.substringAfterLast('/')?.substringBefore('.') ?: "Program"
             else -> "Steam"
         } else null
         // The libraries, off the main thread: manifests and a folder scan.
