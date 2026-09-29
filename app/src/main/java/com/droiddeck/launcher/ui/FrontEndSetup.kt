@@ -158,8 +158,8 @@ internal fun SetupPanel(
     var showLimitDetails by rememberSaveable { mutableStateOf(false) }
     val checks = 4
     val readyCount = listOf(gpuOk, s.ready && !s.busy, !limitBlocks, signedIn).count { it }
-    // Five tabs instead of one long scroll; LB and RB turn them from anywhere on the page.
-    val tabs = listOf("Overview", "Controller", "Session", "Launcher", "About")
+    // Four durable buckets instead of a miscellaneous Session tab; LB and RB turn them from anywhere on the page.
+    val tabs = listOf("Overview", "Controller", "Launcher", "Support")
     var tab by rememberSaveable { mutableStateOf(0) }
     val tabFocus = remember { List(tabs.size) { FocusRequester() } }
     var tabTurned by remember { mutableStateOf(false) }
@@ -258,9 +258,7 @@ internal fun SetupPanel(
                             ControllerRows(host, s.oscMode, controller, a.controller)
                         }
                         if (s.controller == null || a.controller == null) Note("Controller settings are unavailable.")
-                    }
-                    2 -> {
-                        SettingsGroup("Session") {
+                        SettingsGroup("Navigation") {
                             ChoiceRow(
                                 host, "back-actions", "Back", SessionPrefs.backActionsOrder(s.backActionsInverted),
                                 listOf(
@@ -268,22 +266,9 @@ internal fun SetupPanel(
                                     true to SessionPrefs.BACK_QAM_THEN_MENU,
                                 ), s.backActionsInverted, onPick = a.onBackActionsInverted,
                             )
-                            SettingsRow("Frame generation", "Select the frame generation mode") {
-                                Box {
-                                    ValueChip(s.frameGenLabel, host.open == "fg") { host.open = if (host.open == "fg") null else "fg" }
-                                    FrameGenMenu(s, a, host)
-                                }
-                            }
-                            ToggleRow(host, "logs", "Session logs", "Saved after each session", s.logsEnabled) { a.onLogs() }
-                            ActionRow("Latest session logs", "Send them with a bug report", "Share logs", a.onShareLogs)
-                            ToggleRow(
-                                host, "offline", "Offline mode",
-                                s.offlineAccount?.let { "Signed in as $it" } ?: "Sign in to Steam first",
-                                s.offline, enabled = s.offlineAccount != null,
-                            ) { a.onOffline() }
                         }
                     }
-                    3 -> {
+                    2 -> {
                         SettingsGroup("Launcher") {
                             SettingsRow("Theme", "Choose the launcher appearance") {
                                 Box {
@@ -314,6 +299,10 @@ internal fun SetupPanel(
                         }
                     }
                     else -> {
+                        SettingsGroup("Support") {
+                            ToggleRow(host, "logs", "Session logs", "Saved after each session", s.logsEnabled) { a.onLogs() }
+                            ActionRow("Latest session logs", "Send them with a bug report", "Share logs", a.onShareLogs)
+                        }
                         SettingsGroup("About") {
                             ActionRow("Build", s.buildLabel, "Check for newer", a.onCheckLatestBuild)
                             ActionRow("Credits", "The people and projects DroidDeck builds on", "View", a.onCredits)
@@ -332,7 +321,7 @@ private fun ToolGrid(s: FrontEndState, a: FrontEndActions) {
     val tools = listOf(
         ToolSpec(Icons.Outlined.Folder, "Files", "Browse and manage files", a.onFiles),
         ToolSpec(Icons.Outlined.Extension, "Proton versions", "Install ARM64 Proton builds", a.onProtons),
-        ToolSpec(Icons.Outlined.Speed, "Performance", "CPU core assignment", a.onPerformance),
+        ToolSpec(Icons.Outlined.Speed, "Performance", "CPU, rendering and session tuning", a.onPerformance),
         ToolSpec(Icons.Outlined.VideogameAsset, "ROMs folder", s.romsDir ?: "Choose where emulator games are stored", a.onRoms),
     )
     Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {

@@ -366,10 +366,6 @@ class MainActivity : ComponentActivity() {
                                 }
                             }, "share-logs").start()
                         },
-                        onOffline = {
-                            OfflineMode.setEnabled(this, !OfflineMode.enabled(this))
-                            offline = OfflineMode.enabled(this)
-                        },
                         onCredits = { showCredits = true },
                         onPageBack = { settingsMode = null; showPerformance = false; showProtons = false; showComponents = false; showMapping = false },
                         onTheme = { id -> SessionPrefs.setTheme(this, id); theme = id },
@@ -816,6 +812,8 @@ class MainActivity : ComponentActivity() {
                 deckyLatestRelease = if (mode == SessionService.MODE_STEAM) decky.deckyReleases.firstOrNull() else null,
                 deckyChecking = decky.deckyChecking, deckyStage = decky.deckyStage, deckyPercent = decky.deckyPercent,
                 deckyEnabled = decky.deckySupervisor, deckySessionRunning = SessionState.running,
+                offlineAccount = if (mode == SessionService.MODE_STEAM) offlineAccount else null,
+                offline = mode == SessionService.MODE_STEAM && offline,
             ),
             ModeSettingsActions(
                 onResolution = { cap -> SessionPrefs.setResolutionCap(this, mode, cap); resolutionCap = cap },
@@ -866,6 +864,10 @@ class MainActivity : ComponentActivity() {
                     SessionPrefs.setRunSteamAtStartup(this, on)
                     runSteamAtStartup = on
                 },
+                onOffline = {
+                    OfflineMode.setEnabled(this, !OfflineMode.enabled(this))
+                    offline = OfflineMode.enabled(this)
+                },
                 onPickAddedGamesDir = { pickAddedGamesDir.launch(InAppFilePicker.buildDirIntent(this, "Choose a folder of your own games", addedGamesDirs.lastOrNull())) },
                 onAddedGamesArt = { on -> SessionPrefs.setAddedGamesArt(this, on); addedGamesArt = on; if (on) refreshAddedGames() },
                 onForgetAddedGamesDir = { dir -> SessionPrefs.setAddedGamesDirs(this, addedGamesDirs - dir); addedGamesDirs = SessionPrefs.addedGamesDirs(this); refreshAddedGames(); refresh() },
@@ -894,6 +896,12 @@ class MainActivity : ComponentActivity() {
             clientOverride = clientOverride, clientCores = clientCores, gameCores = gameCores,
             tuSysmem = tuSysmem, zinkLazy = zinkLazy, glThread = glThread, noGlError = noGlError, noXalia = noXalia,
             prootNoSeccomp = prootNoSeccomp, guestHostname = guestHostname, phantomWarning = phantomWarning,
+            frameGenEngine = FrameGen.engine(this), frameGenMultiplier = FrameGen.multiplier(this),
+            lsfgReady = LsfgNative.isInstalled(this),
+            onFrameGenPick = { engine, multiplier ->
+                FrameGen.set(this, engine, multiplier)
+                frameGenLabel = FrameGen.label(this)
+            },
             onClientOverride = { on -> SessionPrefs.setClientCpusOverride(this, on); clientOverride = on },
             onTuSysmem = { on -> SessionPrefs.setTuSysmem(this, on); tuSysmem = on },
             onZinkLazy = { on -> SessionPrefs.setZinkLazy(this, on); zinkLazy = on },

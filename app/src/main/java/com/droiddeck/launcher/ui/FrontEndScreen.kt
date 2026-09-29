@@ -139,7 +139,6 @@ class FrontEndActions(
     val onBrowseFiles: (File) -> Unit = {},
     val onLogs: () -> Unit,
     val onShareLogs: () -> Unit = {},
-    val onOffline: () -> Unit,
     val onCredits: () -> Unit,
     val onPageBack: () -> Unit = {},
     val onTheme: (String) -> Unit = {},

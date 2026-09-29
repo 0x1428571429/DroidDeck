@@ -1,6 +1,7 @@
 package com.droiddeck.launcher.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import com.droiddeck.launcher.R
@@ -72,6 +74,9 @@ class ModeSettings(
     val steamDeckMode: Boolean = false,
     /** Steam only: start a Steam session when DroidDeck opens. */
     val runSteamAtStartup: Boolean = false,
+    /** Steam only: remembered login and requested offline state. */
+    val offlineAccount: String? = null,
+    val offline: Boolean = false,
     /** Steam only: the user's chosen Games folders; null outside Steam. */
     val addedGamesDirs: List<String>? = null,
     val addedGames: List<AddedGameRow> = emptyList(),
@@ -127,6 +132,7 @@ class ModeSettingsActions(
     val onSteamChannel: (String) -> Unit = {},
     val onSteamDeckMode: (Boolean) -> Unit = {},
     val onRunSteamAtStartup: (Boolean) -> Unit = {},
+    val onOffline: () -> Unit = {},
     val onPickAddedGamesDir: () -> Unit = {},
     val onForgetAddedGamesDir: (path: String) -> Unit = {},
     val onAddedGamesArt: (Boolean) -> Unit = {},
@@ -150,6 +156,22 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
     var driverPage by remember { mutableStateOf<String?>(null) }
     var returnTo by remember { mutableStateOf<String?>(null) }
     val pageScroll = androidx.compose.foundation.rememberScrollState()
+    val tabs = if (steam) listOf("Display", "Controls", "Runtime", "Steam", "Games")
+        else listOf("Display", "Controls", "Runtime")
+    var tab by rememberSaveable(s.mode) { mutableStateOf(0) }
+    val tabFocus = remember { List(tabs.size) { androidx.compose.ui.focus.FocusRequester() } }
+    var tabTurned by remember { mutableStateOf(false) }
+    val inputModeManager = androidx.compose.ui.platform.LocalInputModeManager.current
+    val pickTab: (Int) -> Unit = { index -> host.open = null; tab = index; tabTurned = true }
+    androidx.compose.runtime.LaunchedEffect(tab) {
+        if (tabTurned) {
+            pageScroll.scrollTo(0)
+            if (inputModeManager.inputMode == androidx.compose.ui.input.InputMode.Keyboard) {
+                androidx.compose.runtime.withFrameNanos { }
+                runCatching { tabFocus[tab].requestFocus() }
+            }
+        }
+    }
     val runtimeChip = remember { androidx.compose.ui.focus.FocusRequester() }
     val displayChip = remember { androidx.compose.ui.focus.FocusRequester() }
     val firstChip = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -196,7 +218,14 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
         onBack = a.onDismiss,
         scroll = pageScroll,
     ) {
-        SettingsGroup("Display") {
+        Column(
+            modifier = Modifier.fillMaxWidth().bumpers(
+                onPrevious = { pickTab((tab + tabs.size - 1) % tabs.size) },
+                onNext = { pickTab((tab + 1) % tabs.size) },
+            ),
+        ) {
+            TabStrip(tabs, tab, pickTab, Modifier.padding(bottom = 4.dp), tabFocus)
+        if (tab == 0) SettingsGroup("Display") {
             val default = SessionPrefs.defaultResolutionCap(s.mode)
             var editCustom by remember { mutableStateOf(false) }
             val custom = s.customResolution
@@ -214,13 +243,18 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 if (custom != null) "Set by the custom resolution." else "Auto uses at least 16:9.",
                 com.droiddeck.launcher.session.SessionPrefs.shapeChoices, s.shapeMode, enabled = custom == null, onPick = a.onShape,
             )
+            if (steam && s.forceFullscreen != null) ToggleRow(
+                host, "fill", "Stretch games to fill the screen",
+                "Keeps games that resize their own window full screen. Turn it off if a game shows up small in a corner. Applies next session.",
+                s.forceFullscreen, onChange = a.onForceFullscreen,
+            )
             if (editCustom) CustomResolutionDialog(
                 initial = custom,
                 onSave = { size -> editCustom = false; a.onCustomResolution(size) },
                 onDismiss = { editCustom = false },
             )
         }
-        SettingsGroup("HDR") {
+        if (tab == 0) SettingsGroup("HDR") {
             ToggleRow(
                 host, "hdr", "HDR10 output",
                 s.hdrReason?.let { "Not available: $it." }
@@ -228,7 +262,7 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 checked = s.hdr && s.hdrReason == null, enabled = s.hdrReason == null, onChange = a.onHdr,
             )
         }
-        SettingsGroup("Drivers") {
+        if (tab == 2) SettingsGroup("Drivers") {
             SettingsRow("Runtime driver", (if (steam) "Used by Steam and games." else "Used by desktop apps.") + " Applies next session.") {
                 ValueChip(
                     s.linuxRows.firstOrNull { it.id == s.linuxSelected }?.name ?: "Runtime default", open = false,
@@ -242,7 +276,7 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 ) { openDriverPage("panel") }
             }
         }
-        SettingsGroup(if (steam) "Touch & controls" else "Touch") {
+        if (tab == 1) SettingsGroup("Controls") {
             ChoiceRow(
                 host, "touch", "Touch", null,
                 listOf("auto" to "Auto", "touchpad" to "Touchpad", "direct" to "Direct"), s.touchMode,
@@ -267,7 +301,7 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 ), s.backActionsInverted, onPick = a.onBackActionsInverted,
             )
         }
-        SettingsGroup("Session") {
+        if (tab == 2) SettingsGroup("Session") {
             ChoiceRow(
                 host, "suspend", "Background behavior",
                 "How this session behaves when the app leaves the screen or the display turns off.",
@@ -281,14 +315,19 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 onPick = a.onSuspendPolicy,
             )
         }
-        if (steam) SettingsGroup("Startup") {
+        if (steam && tab == 3) SettingsGroup("Startup & account") {
             ToggleRow(
                 host, "steam-startup", "Run Steam when DroidDeck starts",
                 "Open the Steam session when you launch DroidDeck.",
                 s.runSteamAtStartup, onChange = a.onRunSteamAtStartup,
             )
+            ToggleRow(
+                host, "offline", "Offline mode",
+                s.offlineAccount?.let { "Signed in as $it" } ?: "Sign in to Steam first",
+                s.offline, enabled = s.offlineAccount != null,
+            ) { a.onOffline() }
         }
-        if (steam) SettingsGroup("Decky") {
+        if (steam && tab == 3) SettingsGroup("Decky") {
             val updateAvailable = s.deckyInstalled != null && s.deckyLatestRelease != null &&
                 s.deckyInstalled != s.deckyLatestRelease.tag
             val status = when {
@@ -340,7 +379,7 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 )
             }
         }
-        if (steam && s.steamChannel != null) SettingsGroup("Client") {
+        if (steam && tab == 3 && s.steamChannel != null) SettingsGroup("Client") {
             ToggleRow(
                 host, "steamdeck", "Steam Deck mode",
                 "Enables Steam's Deck interface and Quick Access performance overlay controls. Applies next session.",
@@ -353,7 +392,7 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 onPick = a.onSteamChannel,
             )
         }
-        if (steam && s.addedGamesDirs != null) SettingsGroup("Added games") {
+        if (steam && tab == 4 && s.addedGamesDirs != null) SettingsGroup("Added games") {
             for (dir in s.addedGamesDirs) {
                 val n = s.addedGames.count { it.folderPath.startsWith("$dir/") }
                 ActionRow(
@@ -378,20 +417,15 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 onPick = { path -> if (path == "__pick__") a.onPickAddedGameExe(g.folderPath) else a.onAddedGameExe(g.folderPath, path) },
             )
         }
-        if (steam && s.fexPreset != null) SettingsGroup(stringResource(R.string.game_settings_title)) {
+        if (steam && tab == 4 && s.fexPreset != null) SettingsGroup(stringResource(R.string.game_settings_title)) {
             ChoiceRow(
                 host, "fex", stringResource(R.string.fex_preset_title), stringResource(R.string.fex_next_launch),
                 FexPreset.all.map { it.id to stringResource(it.label) }, s.fexPreset,
                 note = stringResource(FexPreset.byId(s.fexPreset).detail), onPick = a.onFexPreset,
             )
             GameEnvironmentRow()
-            if (s.forceFullscreen != null) ToggleRow(
-                host, "fill", "Stretch games to fill the screen",
-                "Keeps games that resize their own window (FlatOut) full screen. Turn it off if a game shows up small in a corner (Quake 3). Applies next session.",
-                s.forceFullscreen, onChange = a.onForceFullscreen,
-            )
         }
-        if (steam && s.directAudio != null && s.mic != null) SettingsGroup("Audio") {
+        if (steam && tab == 2 && s.directAudio != null && s.mic != null) SettingsGroup("Audio") {
             ToggleRow(host, "da", "DirectAudio for games", "Bypasses PulseAudio for lower latency in games.", s.directAudio, onChange = a.onDirectAudio)
             ChoiceRow(
                 host, "clientAudio", "Steam client audio", "Classic is the AAudio sink from 0.1.5. DirectAudio goes through the relay. Applies next session.",
@@ -400,7 +434,7 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
             )
             ToggleRow(host, "mic", "Microphone", "Uses the device microphone for voice chat.", s.mic, onChange = a.onMic)
         }
-        if (steam && s.gameStorage != null) SettingsGroup("Game storage") {
+        if (steam && tab == 4 && s.gameStorage != null) SettingsGroup("Game storage") {
             val custom = s.gameStorage.isNotEmpty() && s.gameStorage != "off" && s.storageOptions.none { it.second == s.gameStorage }
             val options = buildList {
                 add("" to ("Automatic - the SD card when one is in" + (if (s.storageOptions.isEmpty()) " (none right now)" else "")))
@@ -431,7 +465,7 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 }
             }
         }
-        if (!steam && s.renderer != null) SettingsGroup("Renderer") {
+        if (!steam && tab == 2 && s.renderer != null) SettingsGroup("Renderer") {
             ChoiceRow(
                 host, "renderer", "Desktop renderer", "Composites the desktop.",
                 listOf("vulkan" to "vulkan - GPU", "gles2" to "gles2 - GPU (experimental)", "pixman" to "pixman - software"), s.renderer,
@@ -440,6 +474,7 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                     "on the GPU instead (right-click one for a desktop window).",
                 onPick = a.onRenderer,
             )
+        }
         }
     }
     if (confirmDeckyRemoval) AlertDialog(

@@ -102,7 +102,7 @@ import com.droiddeck.launcher.input.SecondScreenDisplay
 import com.droiddeck.launcher.input.SecondScreenMode
 import kotlinx.coroutines.flow.collect
 
-private val drawerPageTitles = listOf("Display", "Controls", "Components", "Settings")
+private val drawerPageTitles = listOf("Display", "Controls", "Components", "Session")
 
 /** One icon per drawer page, in page order (QAM-style tabs). */
 private val drawerPageIcons = listOf(Icons.Outlined.DesktopWindows, Icons.Outlined.SportsEsports, Icons.Outlined.Layers, Icons.Outlined.Settings)

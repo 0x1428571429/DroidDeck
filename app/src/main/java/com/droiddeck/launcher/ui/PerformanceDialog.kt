@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.droiddeck.launcher.gpu.FrameGen
 import com.droiddeck.launcher.session.SessionPrefs
 
 class CoreRow(val core: Int, val label: String)
@@ -40,6 +41,10 @@ fun PerformancePage(
     prootNoSeccomp: Boolean,
     guestHostname: String,
     phantomWarning: String?,
+    frameGenEngine: String,
+    frameGenMultiplier: Int,
+    lsfgReady: Boolean,
+    onFrameGenPick: (engine: String, multiplier: Int) -> Unit,
     onClientOverride: (Boolean) -> Unit,
     onTuSysmem: (Boolean) -> Unit,
     onZinkLazy: (Boolean) -> Unit,
@@ -57,9 +62,20 @@ fun PerformancePage(
     val coreItems = cores.map { it.core to it.label }
     SettingsPage(
         host, title = "Performance",
-        lede = "CPU cores, session fixes and the host name. Applies next session.",
+        lede = "Rendering, CPU cores and session tuning. Most changes apply next session.",
         onBack = onDismiss,
     ) {
+        SettingsGroup("Rendering") {
+            val fgOpen = host.open == "fg"
+            SettingsRow("Frame generation", "Default for game launches; it can still be changed per game or while running.", highlighted = fgOpen) {
+                androidx.compose.foundation.layout.Box {
+                    ValueChip(FrameGen.label(frameGenEngine, frameGenMultiplier), fgOpen) {
+                        host.open = if (fgOpen) null else "fg"
+                    }
+                    FrameGenMenu(host, frameGenEngine, frameGenMultiplier, lsfgReady, onFrameGenPick)
+                }
+            }
+        }
         SettingsGroup("Steam client cores") {
             ToggleRow(
                 host, "override", "Override Steam's own core choice",
