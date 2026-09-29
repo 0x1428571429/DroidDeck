@@ -18,22 +18,11 @@ import com.droiddeck.launcher.MainActivity
 import com.droiddeck.launcher.R
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import java.net.Inet4Address
-import java.net.InetAddress
-import java.net.NetworkInterface
 
-/**
- * Pairs Wireless debugging without the user leaving Android Settings. Settings closes its pairing
- * pop-up as soon as another app comes forward, so instead of asking for the pop-up's address in
- * DroidDeck, this finds the pairing port over mDNS while the pop-up is open and takes the 6-digit
- * code as an inline reply on its notification. It then applies the child-process setting and ends.
- */
 class WirelessAdbPairingService : Service() {
     sealed interface Stage {
         data object Idle : Stage
-        /** Waiting for the user to open "Pair device with pairing code". */
         data object Waiting : Stage
-        /** The pop-up is open; the notification asks for its code. */
         data class CodeNeeded(val error: String? = null) : Stage
         data class Working(val step: String) : Stage
         data object Done : Stage
@@ -99,8 +88,7 @@ class WirelessAdbPairingService : Service() {
         override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
         override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
             val address = serviceInfo.host ?: return
-            // Only this device's own pop-up: another phone pairing on the same Wi-Fi is not ours.
-            if (!isLocalAddress(address)) return
+            if (!WirelessAdbFix.isLocalAddress(address)) return
             main.post {
                 if (working || current.value == Stage.Done) return@post
                 pairingHost = address.hostAddress
@@ -125,22 +113,24 @@ class WirelessAdbPairingService : Service() {
         working = true
         show(Stage.Working("Pairing…"))
         Thread({
-            val paired = runCatching { kotlinx.coroutines.runBlocking { WirelessAdbFix.pair(this@WirelessAdbPairingService, host, port, code) } }
+            val paired = runCatching { kotlinx.coroutines.runBlocking { WirelessAdbFix.pair(this@WirelessAdbPairingService, WirelessAdbFix.LOOPBACK, port, code) } }
             if (paired.isFailure) {
                 main.post {
                     working = false
-                    // A wrong code closes the pop-up on most builds; the next one it opens is found again.
                     pairingPort = null
                     show(Stage.CodeNeeded("That code didn't work. Open the pairing pop-up again and enter its new code."))
                 }
                 return@Thread
             }
-            main.post { show(Stage.Working("Paired. Connecting…")) }
+            main.post {
+                stopDiscovery()
+                show(Stage.Working("Paired. Connecting…"))
+            }
             val result = runCatching {
-                val connectPort = WirelessAdbFix.findConnectPort(this, host)
+                val connectPort = WirelessAdbFix.findConnectPort(this, WirelessAdbFix.LOOPBACK)
                     ?: error("Paired, but the Wireless debugging port was not found. Keep Wireless debugging on and try again.")
                 main.post { show(Stage.Working("Applying the setting…")) }
-                WirelessAdbFix.setChildProcessLimit(this, host, connectPort, false)
+                WirelessAdbFix.setChildProcessLimit(this, WirelessAdbFix.LOOPBACK, connectPort, false)
             }
             main.post {
                 working = false
@@ -154,7 +144,6 @@ class WirelessAdbPairingService : Service() {
         getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification(stage))
     }
 
-    /** Ends the service; a result the user should see stays behind as a normal notification. */
     private fun finish(stage: Stage) {
         main.removeCallbacks(timeout)
         stopDiscovery()
@@ -181,7 +170,6 @@ class WirelessAdbPairingService : Service() {
 
     private fun notification(stage: Stage): Notification {
         val manager = getSystemService(NotificationManager::class.java)
-        // High importance so each step heads up over Settings, where the user is looking.
         manager?.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Wireless debugging setup",
             NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Asks for the Wireless debugging pairing code while Settings is open"
@@ -260,7 +248,6 @@ class WirelessAdbPairingService : Service() {
 
         fun start(context: Context) {
             context.getSystemService(NotificationManager::class.java)?.cancel(RESULT_NOTIFICATION_ID)
-            // Now, not when the service gets going: the Settings intent sent next reads it.
             publish(Stage.Waiting)
             val intent = Intent(context, WirelessAdbPairingService::class.java)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
@@ -276,12 +263,5 @@ class WirelessAdbPairingService : Service() {
 
         fun notificationsEnabled(context: Context): Boolean =
             context.getSystemService(NotificationManager::class.java)?.areNotificationsEnabled() != false
-
-        private fun isLocalAddress(address: InetAddress): Boolean = runCatching {
-            if (address.isLoopbackAddress) return true
-            NetworkInterface.getNetworkInterfaces()?.toList().orEmpty().any { network ->
-                network.inetAddresses.toList().any { it.address.contentEquals(address.address) }
-            }
-        }.getOrDefault(address is Inet4Address)
     }
 }

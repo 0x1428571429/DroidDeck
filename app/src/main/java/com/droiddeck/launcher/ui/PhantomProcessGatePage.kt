@@ -39,11 +39,6 @@ import com.droiddeck.launcher.core.PhantomProcessStatus
 import com.droiddeck.launcher.core.WirelessAdbPairingService
 import com.droiddeck.launcher.core.WirelessAdbPairingService.Stage
 
-/**
- * Stops a Steam launch until Android's child-process limit is off. One primary route, chosen by
- * what this Android version offers: the Developer options toggle on 14+, and on 12 and 13 (no
- * toggle) pairing Wireless debugging through a notification. Everything else sits under Other ways.
- */
 @Composable
 fun PhantomProcessGatePage(
     status: PhantomProcessStatus,
@@ -57,7 +52,6 @@ fun PhantomProcessGatePage(
     BackHandler(onBack = onDismiss)
     val context = LocalContext.current
     val stage by WirelessAdbPairingService.stage.collectAsState()
-    // Wi-Fi and notifications can change while the user is in Settings; recheck with the status.
     val environment by produceState(GateEnvironment.read(context)) {
         while (true) {
             value = GateEnvironment.read(context)
@@ -137,7 +131,7 @@ private fun FixGroup(
             when {
                 pairing -> PairingProgress(stage, onCancel)
                 hasToggle -> {
-                    Body("Turn off “Disable child process restrictions”, then come back. DroidDeck notices on its own.")
+                    Body("Turn on “Disable child process restrictions”, then come back. Keep Developer options on afterwards: turning them off turns the switch back off.")
                     PrimaryButton("Open Developer options", compact = compact, onClick = onOpenDeveloperOptions)
                 }
                 else -> {
@@ -245,7 +239,7 @@ private fun OtherWays(
             SecondaryButton("Enter address manually", compact = true, onClick = onEnterAddressManually)
             Body("From a computer with ADB:")
             Text(
-                PhantomProcessLimit.ADB_COMMAND,
+                PhantomProcessLimit.adbCommand(),
                 style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 11.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

@@ -1047,15 +1047,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshPhantomStatus() {
-        phantomProcessStatus = PhantomProcessLimit.read(contentResolver)
+        phantomProcessStatus = PhantomProcessLimit.read(this)
         phantomWarning = if (PhantomProcessLimit.blocksSteam(phantomProcessStatus)) {
-            "${PhantomProcessLimit.title(phantomProcessStatus)}. ${PhantomProcessLimit.instructions(phantomProcessStatus)}\n\n${PhantomProcessLimit.ADB_COMMAND}"
+            "${PhantomProcessLimit.title(phantomProcessStatus)}. ${PhantomProcessLimit.instructions(phantomProcessStatus)}\n\n${PhantomProcessLimit.adbCommand()}"
         } else null
     }
 
     private fun openDeveloperOptions(displayId: Int?) {
-        // Settings scrolls to and highlights the key it is given; the wireless pairing flow wants
-        // Wireless debugging, and the toggle on Android 14+ is further down the same page.
         val highlight = if (PhantomProcessLimit.hasDeveloperToggle() &&
             WirelessAdbPairingService.stage.value == WirelessAdbPairingService.Stage.Idle) null else "toggle_adb_wireless"
         val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
