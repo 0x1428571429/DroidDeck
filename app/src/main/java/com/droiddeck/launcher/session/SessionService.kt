@@ -240,10 +240,12 @@ class SessionService : Service() {
         val override = File(Environment.getExternalStorageDirectory(), TU_DEBUG_SWITCH)
             .takeIf { it.isFile }?.let { FileUtils.readString(it)?.trim() }
         if (!override.isNullOrEmpty()) return override
-        if (SessionPrefs.tuSysmem(this)) return "sysmem"
-        if (linuxDriverId.isEmpty()) return null
-        val name = LinuxVulkanDriverManager(this).getDriverName(linuxDriverId).lowercase()
-        return if (name.contains("710-720") || name.contains("710_720")) "sysmem" else null
+        // noconform: Turnip keeps the Vulkan features it has not passed conformance for (WinNative's
+        // default beside sysmem), which DXVK and vkd3d-proton reach for.
+        val sysmem = SessionPrefs.tuSysmem(this) || linuxDriverId.isNotEmpty() &&
+            LinuxVulkanDriverManager(this).getDriverName(linuxDriverId).lowercase()
+                .let { it.contains("710-720") || it.contains("710_720") }
+        return if (sysmem) "noconform,sysmem" else "noconform"
     }
 
     // ── The session ─────────────────────────────────────────────────────────────────────────
@@ -519,6 +521,8 @@ class SessionService : Service() {
         // BL_STEAMDECK; it is the one that builds the command line).
         if (SessionPrefs.glThread(this)) guest.add("mesa_glthread=true")
         if (SessionPrefs.noGlError(this)) guest.add("MESA_NO_ERROR=1")
+        // Zink packs its descriptor sets and shader interfaces tighter (WinNative's default).
+        guest.add("ZINK_DEBUG=compact")
         if (SessionState.mode == MODE_STEAM) guest.add("BL_STEAMDECK=" + (if (SessionPrefs.steamDeckMode(this)) "1" else "0"))
         if (steamHere) guest.add("BL_STEAM_CHANNEL=" + SessionPrefs.steamChannel(this))
         if (SessionState.mode == MODE_STEAM) {

@@ -204,6 +204,17 @@ object SessionPrefs {
      * Bannerlator's session: the compositor's queue preempting the game's buys nothing on a device
      * whose GPU is waiting on the CPU.
      */
+    /**
+     * Whether the session window asks for Android's sustained performance mode. Off by default: it
+     * holds the SoC at clocks it can keep for hours, which on many devices is a cap well under
+     * the peak a game session gets without it (WinNative never asks for it).
+     */
+    fun sustainedPerformance(context: Context): Boolean = prefs(context).getBoolean("sustainedPerformance", false)
+
+    fun setSustainedPerformance(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("sustainedPerformance", on).apply()
+    }
+
     fun gamescopeRealtime(context: Context): Boolean = prefs(context).getBoolean("gamescopeRealtime", false)
 
     fun setGamescopeRealtime(context: Context, on: Boolean) {
@@ -242,7 +253,7 @@ object SessionPrefs {
     }
 
     /** Turnip's sysmem rendering (TU_DEBUG=sysmem) for the runtime's driver: bypasses GMEM tiling. */
-    fun tuSysmem(context: Context): Boolean = prefs(context).getBoolean("tuSysmem", false)
+    fun tuSysmem(context: Context): Boolean = prefs(context).getBoolean("tuSysmem", true)
 
     fun setTuSysmem(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean("tuSysmem", on).apply()
@@ -323,8 +334,12 @@ object SessionPrefs {
     fun resolutionChosen(context: Context, mode: String): Boolean =
         prefs(context).contains("resolutionCap.$mode") || customResolution(context, mode) != null
 
-    /** The FEXCore preset for the games the client launches (core/FexPreset ids); "" = FEX's defaults. */
-    fun fexPreset(context: Context): String = prefs(context).getString("fexPreset", "") ?: ""
+    /**
+     * The FEXCore preset for the games the client launches (core/FexPreset ids); "" = FEX's own
+     * defaults. PERFORMANCE_TSO unless chosen: TSO only on the main path, x87 reduced precision
+     * and multiblock, as WinNative ships it.
+     */
+    fun fexPreset(context: Context): String = prefs(context).getString("fexPreset", "PERFORMANCE_TSO") ?: "PERFORMANCE_TSO"
 
     fun setFexPreset(context: Context, id: String) {
         prefs(context).edit().putString("fexPreset", id).apply()

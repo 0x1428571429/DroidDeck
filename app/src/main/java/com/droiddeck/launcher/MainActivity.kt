@@ -124,10 +124,11 @@ class MainActivity : ComponentActivity() {
     private var clientOverride by mutableStateOf(false)
     private var clientCores by mutableStateOf<Set<Int>>(emptySet())
     private var gameCores by mutableStateOf<Set<Int>>(emptySet())
-    private var tuSysmem by mutableStateOf(false)
+    private var tuSysmem by mutableStateOf(true)
     private var zinkLazy by mutableStateOf(false)
     private var noXalia by mutableStateOf(true)
     private var gamescopeRealtime by mutableStateOf(false)
+    private var sustainedPerformance by mutableStateOf(false)
     private var prootNoSeccomp by mutableStateOf(false)
     private var guestHostname by mutableStateOf(SessionPrefs.DEFAULT_GUEST_HOSTNAME)
     private var phantomWarning by mutableStateOf<String?>(null)
@@ -895,7 +896,7 @@ class MainActivity : ComponentActivity() {
             cores = CpuCores.all.map { c -> CoreRow(c, "cpu$c" + (CpuCores.maxGhz(c)?.let { String.format(java.util.Locale.US, " · %.1f GHz", it) } ?: "")) },
             clientOverride = clientOverride, clientCores = clientCores, gameCores = gameCores,
             tuSysmem = tuSysmem, zinkLazy = zinkLazy, glThread = glThread, noGlError = noGlError, noXalia = noXalia,
-            gamescopeRealtime = gamescopeRealtime,
+            gamescopeRealtime = gamescopeRealtime, sustainedPerformance = sustainedPerformance,
             prootNoSeccomp = prootNoSeccomp, guestHostname = guestHostname, phantomWarning = phantomWarning,
             onClientOverride = { on -> SessionPrefs.setClientCpusOverride(this, on); clientOverride = on },
             onTuSysmem = { on -> SessionPrefs.setTuSysmem(this, on); tuSysmem = on },
@@ -904,6 +905,7 @@ class MainActivity : ComponentActivity() {
             onNoGlError = { on -> SessionPrefs.setNoGlError(this, on); noGlError = on },
             onNoXalia = { on -> SessionPrefs.setNoXalia(this, on); noXalia = on },
             onGamescopeRealtime = { on -> SessionPrefs.setGamescopeRealtime(this, on); gamescopeRealtime = on },
+            onSustainedPerformance = { on -> SessionPrefs.setSustainedPerformance(this, on); sustainedPerformance = on },
             onProotNoSeccomp = { on -> SessionPrefs.setProotNoSeccomp(this, on); prootNoSeccomp = on },
             onGuestHostname = { name -> SessionPrefs.setGuestHostname(this, name) },
             onClientCore = { core, on ->
@@ -999,6 +1001,7 @@ class MainActivity : ComponentActivity() {
         zinkLazy = SessionPrefs.zinkLazy(this)
         noXalia = SessionPrefs.noXalia(this)
         gamescopeRealtime = SessionPrefs.gamescopeRealtime(this)
+        sustainedPerformance = SessionPrefs.sustainedPerformance(this)
         prootNoSeccomp = SessionPrefs.prootNoSeccomp(this)
         guestHostname = SessionPrefs.guestHostname(this)
         refreshPhantomStatus()

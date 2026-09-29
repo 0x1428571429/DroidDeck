@@ -38,6 +38,7 @@ fun PerformancePage(
     noGlError: Boolean,
     noXalia: Boolean,
     gamescopeRealtime: Boolean,
+    sustainedPerformance: Boolean,
     prootNoSeccomp: Boolean,
     guestHostname: String,
     phantomWarning: String?,
@@ -48,6 +49,7 @@ fun PerformancePage(
     onNoGlError: (Boolean) -> Unit,
     onNoXalia: (Boolean) -> Unit,
     onGamescopeRealtime: (Boolean) -> Unit,
+    onSustainedPerformance: (Boolean) -> Unit,
     onProotNoSeccomp: (Boolean) -> Unit,
     onGuestHostname: (String) -> Unit,
     onClientCore: (Int, Boolean) -> Unit,
@@ -105,13 +107,18 @@ fun PerformancePage(
         SettingsGroup("Session fixes") {
             ToggleRow(
                 host, "sysmem", "Turnip: sysmem rendering",
-                "Required on Adreno 710/720/722. May fix corruption on other Adreno GPUs, but can reduce performance.",
+                "On by default, as in WinNative. Required on Adreno 710/720/722; turn off to try GMEM tiling on other Adreno GPUs.",
                 tuSysmem, onChange = onTuSysmem,
             )
             ToggleRow(
                 host, "xalia", "Skip Steam's xalia helper",
                 "Disables Proton's gamepad navigation helper, which costs every game CPU time. Turn off only if a game needs it.",
                 noXalia, onChange = onNoXalia,
+            )
+            ToggleRow(
+                host, "sustained", "Android sustained performance mode",
+                "Holds clocks the device can keep for hours. Steadier on hot devices, but usually a lower peak.",
+                sustainedPerformance, onChange = onSustainedPerformance,
             )
             ToggleRow(
                 host, "seccomp", "Run proot without seccomp",

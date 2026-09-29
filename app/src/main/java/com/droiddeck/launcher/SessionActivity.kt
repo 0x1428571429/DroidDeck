@@ -849,9 +849,18 @@ class SessionActivity : ComponentActivity(), SurfaceHolder.Callback {
         return Pair(width and 1.inv(), height and 1.inv())
     }
 
+    /**
+     * The rate the panel runs the session at: its fastest mode at the current size, which PerfMode
+     * asks for. The display's current rate is read too early for that - a phone still at 60 Hz
+     * when the surface arrives handed gamescope -r 60 and capped every game at 60.
+     */
     private fun refreshHz(): Float {
         val display = if (Build.VERSION.SDK_INT >= 30) display else windowManager.defaultDisplay
-        val hz = display?.refreshRate ?: 60f
+        val cur = display?.mode
+        val best = if (cur == null) null else display.supportedModes
+            .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
+            .maxOfOrNull { it.refreshRate }
+        val hz = maxOf(best ?: 0f, display?.refreshRate ?: 0f)
         return if (hz > 1f) hz else 60f
     }
 

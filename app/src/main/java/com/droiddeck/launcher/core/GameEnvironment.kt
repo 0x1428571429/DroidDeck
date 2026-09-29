@@ -27,8 +27,9 @@ object GameEnvironment {
 
     fun defaults(preset: String): Map<String, String?> = linkedMapOf<String, String?>(
         "MESA_SHADER_CACHE_DISABLE" to "false",
-        "VKD3D_FEATURE_LEVEL" to "12_2",
-        "VKD3D_SHADER_MODEL" to "6_9",
+        // The feature level is left to vkd3d-proton, which reports what the driver can do; forcing
+        // 12_2 sent games down DX12 Ultimate paths Turnip only emulates. 6_6 is WinNative's model.
+        "VKD3D_SHADER_MODEL" to "6_6",
     ).apply {
         FexPreset.env(preset).forEach { put(it.substringBefore('='), it.substringAfter('=')) }
     }

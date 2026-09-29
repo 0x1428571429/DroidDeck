@@ -13,8 +13,8 @@ import android.util.Log
  * The manifest already makes the app a game (appCategory + game_mode_config); this is the
  * per-window half, applied when the session activity is created:
  *
- *  - sustained performance mode (Android 7+): a clock floor that does not throttle away after
- *    two minutes, which suits an hour in Big Picture better than a boost that fades;
+ *  - sustained performance mode (Android 7+), only when the Performance page asks for it: clocks
+ *    the SoC can hold for hours, which on many devices caps the peak a session otherwise gets;
  *  - the panel's fastest mode at its current size (Android 6+): a 120 Hz phone is switched to
  *    120 Hz for the menu, not only when a game votes for it;
  *  - GameManager's game state (Android 13+): "in gameplay", so an OEM framework that releases
@@ -30,7 +30,7 @@ object PerfMode {
         val parts = ArrayList<String>(3)
 
         // Sustained performance mode.
-        parts += if (Build.VERSION.SDK_INT >= 24) {
+        parts += if (!SessionPrefs.sustainedPerformance(a)) "sustained mode off" else if (Build.VERSION.SDK_INT >= 24) {
             val pm = a.getSystemService(PowerManager::class.java)
             if (pm?.isSustainedPerformanceModeSupported == true) {
                 try { a.window.setSustainedPerformanceMode(true); "sustained mode on" } catch (t: Throwable) { Log.w(TAG, "sustained mode", t); "sustained mode refused" }

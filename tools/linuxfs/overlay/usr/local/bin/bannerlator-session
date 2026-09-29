@@ -372,11 +372,18 @@ case $mode in
     # ~/.droiddeck-fill, and each change goes to gamescope as GAMESCOPE_FORCE_WINDOWS_FULLSCREEN on
     # the root window, which it watches. What gamescope was started with is where this begins.
     # Not on the desktop (BL_DESKTOP): no gamescope there, and the loop would outlive the client.
+    # The loops below poll for the whole session, and every sleep, cat or script they start is a
+    # fork and exec under proot. They wait with a read timeout on a FIFO nothing writes to and
+    # read files with builtins, so an idle beat costs no process at all.
+    _bl_fifo=$(mktemp -u "${TMPDIR:-/tmp}/bl-nap.XXXXXX") && mkfifo "$_bl_fifo" \
+      && exec {_bl_nap}<>"$_bl_fifo" && rm -f "$_bl_fifo"
+    nap() { if [ -n "${_bl_nap:-}" ]; then read -r -t "$1" -u "$_bl_nap" _ || true; else sleep "$1"; fi; }
     [ -z "${BL_DESKTOP:-}" ] && (
       last=${BL_GAMESCOPE_FORCE_FULLSCREEN:-1}
       while :; do
-        sleep 1
-        want=$(cat "$HOME/.droiddeck-fill" 2>/dev/null) || continue
+        nap 1
+        want=
+        read -r want <"$HOME/.droiddeck-fill" 2>/dev/null || [ -n "$want" ] || continue
         case $want in 0|1) ;; *) continue ;; esac
         [ "$want" = "$last" ] && continue
         if xprop -root -f GAMESCOPE_FORCE_WINDOWS_FULLSCREEN 32c -set GAMESCOPE_FORCE_WINDOWS_FULLSCREEN "$want" 2>/dev/null; then
@@ -385,14 +392,37 @@ case $mode in
         fi
       done
     ) &
+    # Each beat only starts a script when there is something for it: the seeder when a prefix has
+    # a registry it has not marked, the registrar (Python, the heavier start) when a library, the
+    # tools directory or the client's config changed since its last run.
     (
+      compat_stamp=$HOME/.cache/droiddeck-compat-stamp
+      needs_seed() {
+        local r
+        for r in "$steam_root"/steamapps/compatdata/*/pfx/system.reg \
+                 /mnt/bannerlator-sd/steamapps/compatdata/*/pfx/system.reg; do
+          [ -f "$r" ] && [ ! -e "${r%/system.reg}/.bannerlator-redists" ] && return 0
+        done
+        return 1
+      }
+      needs_compat() {
+        local d
+        [ -e "$compat_stamp" ] || return 0
+        for d in "$steam_root/steamapps" "$steam_root/compatibilitytools.d" "$steam_root/config" \
+                 /mnt/bannerlator-sd/steamapps; do
+          [[ -e $d && $d -nt $compat_stamp ]] && return 0
+        done
+        return 1
+      }
       beat=0
-      for _ in $(seq 1 720); do
-        sleep 5
-        bannerlator-seed-redists "$steam_root" >/dev/null 2>&1 || true
+      while [ "$beat" -lt 720 ]; do
+        nap 5
+        needs_seed && { bannerlator-seed-redists "$steam_root" >/dev/null 2>&1 || true; }
         beat=$((beat + 1))
-        if [ "$((beat % 3))" -eq 0 ]; then
+        if [ "$((beat % 3))" -eq 0 ] && needs_compat; then
+          : >"$compat_stamp"
           bannerlator-steam-compat "$steam_root" >/dev/null 2>&1 || true
+          : >"$compat_stamp"
         fi
       done
     ) &
@@ -559,7 +589,7 @@ BUSCONF
             "$steam_root/steamrtarm64/steam" -shutdown >/dev/null 2>&1 || true
             exit 0
           fi
-          sleep 0.5
+          nap 0.5
         done
       ) &
       stop_watcher=$!
