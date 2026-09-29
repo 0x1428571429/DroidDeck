@@ -36,6 +36,8 @@ object GuestCommand {
         val root = LinuxRuntime.rootDir(context)
         LinuxRuntime.writeAccounts(context)
         SessionFiles.stage(context, root)
+        // The resolver otherwise names the DNS of whatever network the last session was on.
+        LinuxNetworkLinkComponent(context, root).publish()
         val runtimeDir = File(context.filesDir, ".flatpak-rt").apply { mkdirs() }
         val cmd = LinuxRuntime.prootPrefix(context, root, "/root", fakeRoot)
         LinuxRuntime.binds(context, null, runtimeDir, Environment.getExternalStorageDirectory(), null)
