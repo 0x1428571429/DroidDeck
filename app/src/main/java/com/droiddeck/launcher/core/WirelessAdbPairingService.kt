@@ -149,9 +149,13 @@ class WirelessAdbPairingService : Service() {
         stopDiscovery()
         publish(stage)
         val manager = getSystemService(NotificationManager::class.java)
-        @Suppress("DEPRECATION")
-        stopForeground(true)
-        if (stage is Stage.Done || stage is Stage.Failed) manager?.notify(RESULT_NOTIFICATION_ID, notification(stage))
+        if (stage is Stage.Done || stage is Stage.Failed) {
+            manager?.notify(NOTIFICATION_ID, notification(stage))
+            stopForeground(STOP_FOREGROUND_DETACH)
+        } else {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            manager?.cancel(NOTIFICATION_ID)
+        }
         stopSelf()
     }
 
@@ -234,7 +238,6 @@ class WirelessAdbPairingService : Service() {
     companion object {
         private const val CHANNEL_ID = "wireless-adb-pairing"
         private const val NOTIFICATION_ID = 3
-        private const val RESULT_NOTIFICATION_ID = 4
         private const val PAIRING_TYPE = "_adb-tls-pairing._tcp"
         private const val ACTION_CODE = "com.droiddeck.launcher.action.WIRELESS_ADB_CODE"
         private const val ACTION_CANCEL = "com.droiddeck.launcher.action.WIRELESS_ADB_CANCEL"
@@ -247,7 +250,7 @@ class WirelessAdbPairingService : Service() {
         private fun publish(stage: Stage) { current.value = stage }
 
         fun start(context: Context) {
-            context.getSystemService(NotificationManager::class.java)?.cancel(RESULT_NOTIFICATION_ID)
+            context.getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
             publish(Stage.Waiting)
             val intent = Intent(context, WirelessAdbPairingService::class.java)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
