@@ -181,7 +181,13 @@ private fun Discover(onOpen: (String) -> Unit, onCategory: (String) -> Unit) {
 
 @Composable
 private fun Search(query: String, category: String?, onQuery: (String) -> Unit, onCategory: (String?) -> Unit, onOpen: (String) -> Unit) {
-    val run = { StoreState.search(query.trim(), category) }
+    val view = androidx.compose.ui.platform.LocalView.current
+    val run = {
+        // The field is an Android EditText; Done leaves its keyboard over the results otherwise.
+        (view.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+            ?.hideSoftInputFromWindow(view.windowToken, 0)
+        StoreState.search(query.trim(), category)
+    }
     Rise(3) {
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
             AdbTextField(
@@ -224,7 +230,7 @@ private fun Installed(a: FrontEndActions, onOpen: (String) -> Unit) {
             }
             if (StoreState.updates.isNotEmpty()) PrimaryButton("Update all (${StoreState.updates.size})", enabled = StoreState.busy == null) {
                 StoreState.update(ctx, null, "Updates")
-            }
+            } else if (StoreState.updatesChecked && !StoreState.checkingUpdates) ActionChip("● Everything is up to date", ok = true)
         }
     }
     if (apps.isEmpty()) {
@@ -282,12 +288,18 @@ private fun AppDetail(s: FrontEndState, a: FrontEndActions, id: String, onBack: 
     }
     val busyHere = StoreState.busy == id
     val installed = local != null
+    // Remove asks twice: one stray press of A should not cost a download. The second press has
+    // to come within a few seconds; the app's own data in ~/.var/app stays either way.
+    var confirmRemove by remember(id) { mutableStateOf(false) }
+    LaunchedEffect(confirmRemove) { if (confirmRemove) { kotlinx.coroutines.delay(4000); confirmRemove = false } }
     Rise(2) {
         Actions {
             if (installed) {
                 PrimaryButton("Open", enabled = !busyHere, main = true) { a.onFlatpakApp(id, name) }
                 if (id in StoreState.updates) SecondaryButton("Update", enabled = StoreState.busy == null) { StoreState.update(ctx, id, name) }
-                SecondaryButton(if (busyHere) "Working…" else "Remove", enabled = StoreState.busy == null) { StoreState.uninstall(ctx, id, name) }
+                SecondaryButton(if (busyHere) "Working…" else if (confirmRemove) "Press again to remove" else "Remove", enabled = StoreState.busy == null) {
+                    if (confirmRemove) { confirmRemove = false; StoreState.uninstall(ctx, id, name) } else confirmRemove = true
+                }
             } else {
                 PrimaryButton(
                     if (busyHere) "Installing…" else "Install", main = true,
@@ -422,4 +434,44 @@ private fun PillButton(label: String, selected: Boolean, onClick: () -> Unit) {
             .controllerConfirm(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 9.dp),
     )
+}
+
+/** The apps installed from the Store, as launch tiles - on the Desktop page beside the emulators. */
+@Composable
+internal fun InstalledAppsGrid(a: FrontEndActions) {
+    val ctx = LocalContext.current
+    LaunchedEffect(Unit) { StoreState.refresh(ctx) }
+    val apps = StoreState.installed
+    if (apps.isEmpty()) return
+    val colors = MaterialTheme.colorScheme
+    val pal = LocalPalette.current
+    val columns = if (LocalNarrowPane.current) 1 else 3
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        SectionTitle("Apps from the Store", apps.size.toString())
+        apps.chunked(columns).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                row.forEach { app ->
+                    key(app.id) {
+                        val src = remember { MutableInteractionSource() }
+                        val hot = rememberHot(src)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f).fillMaxHeight().paneItem("tile:flatpak:${app.id}")
+                                .clip(Shape14).background(if (hot) pal.signal.copy(alpha = 0.10f) else colors.surface)
+                                .border(if (hot) 2.dp else 1.dp, if (hot) pal.signal else pal.line, Shape14)
+                                .hoverable(src).clickable(interactionSource = src, indication = LocalIndication.current, role = Role.Button) { a.onFlatpakApp(app.id, app.name) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                        ) {
+                            AppIcon(app.icon ?: StoreState.details[app.id]?.icon ?: FlathubApi.iconUrl(app.id), app.name, 44)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(app.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(app.summary ?: "Flatpak", fontSize = 13.sp, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
 }

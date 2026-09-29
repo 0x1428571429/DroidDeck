@@ -25,6 +25,9 @@ object StoreState {
         private set
     var checkingUpdates by mutableStateOf(false)
         private set
+    /** Flathub has been asked this session, so an empty [updates] means up to date. */
+    var updatesChecked by mutableStateOf(false)
+        private set
     /** What is running: "setup", an app id, or "update-all"; null when idle. */
     var busy by mutableStateOf<String?>(null)
         private set
@@ -132,7 +135,7 @@ object StoreState {
             val u = FlatpakManager.updates(app)
             main.post {
                 checkingUpdates = false
-                if (u != null) updates = u else Toast.makeText(app, "Could not check Flathub for updates", Toast.LENGTH_SHORT).show()
+                if (u != null) { updates = u; updatesChecked = true } else Toast.makeText(app, "Could not check Flathub for updates", Toast.LENGTH_SHORT).show()
             }
         }, "store-updates").start()
     }

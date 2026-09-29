@@ -197,6 +197,7 @@ private fun Content(
                     Rise(3) { SectionTitle("Emulators", "${installed.size} installed") }
                     Rise(4) { EmulatorGrid(installed, first = true, onSelect = onSelect) }
                 }
+                Rise(5) { InstalledAppsGrid(a) }
                 if (available.isNotEmpty()) {
                     Rise(5) { SectionTitle("Available to install", available.size.toString()) }
                     Rise(6) { EmulatorGrid(available, first = installed.isEmpty(), onSelect = onSelect) }
