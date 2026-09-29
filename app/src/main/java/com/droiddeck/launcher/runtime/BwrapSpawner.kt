@@ -211,8 +211,69 @@ object BwrapSpawner {
         val argv = request.getJSONArray("argv").let { a -> (0 until a.length()).map { a.getString(it) } }
         val env = LinkedHashMap<String, String>()
         request.optJSONObject("env")?.let { e -> e.keys().forEach { k -> env[k] = e.getString(k) } }
+        if (binds.any { it.guest == "/dev" }) gpu(rootfs, root, env)?.forEach { addBind(it) }
+        preload(session, rootfs, env).forEach { addBind(it) }
         return Plan(root, binds, request.optString("cwd", "/").ifEmpty { "/" }, argv, env)
     }
+
+    /** Where a sandbox finds the runtime's own GPU driver. */
+    private const val GPU_DIR = "/run/droiddeck-gpu"
+
+    /**
+     * The GPU, for an app that is given /dev. Flathub's Mesa has Turnip, but built for the DRM
+     * kernel driver: Adreno on Android is KGSL, so apps fell back to drawing on the CPU. The
+     * runtime's own Turnip has the KGSL backend and needs nothing the Freedesktop runtime lacks
+     * but three libraries, which come with it; Mesa's GL then runs on it through Zink. An app's
+     * own choice of driver (VK_ICD_FILENAMES, MESA_LOADER_DRIVER_OVERRIDE) is left alone.
+     */
+    private fun gpu(rootfs: String, root: File, env: MutableMap<String, String>): List<Bind>? {
+        val lib = File(rootfs, "usr/lib")
+        val driver = File(lib, "libvulkan_freedreno.so")
+        if (!driver.isFile || !File("/dev/kgsl-3d0").exists()) return null
+        if (env.containsKey("VK_ICD_FILENAMES") || env.containsKey("VK_DRIVER_FILES")) return null
+        val binds = ArrayList<Bind>()
+        for (name in listOf("libvulkan_freedreno.so", "libdisplay-info.so.3", "libSPIRV-Tools.so", "libSPIRV-Tools-opt.so")) {
+            val f = File(lib, name)
+            if (!f.exists()) { Log.w(TAG, "gpu: the runtime has no $name; apps draw on the CPU"); return null }
+            binds.add(Bind(f.canonicalPath, "$GPU_DIR/$name"))
+        }
+        // Beside the sandbox root, in the sandbox's own directory: removed with it.
+        val icd = File(root.parentFile, "freedreno_icd.json")
+        icd.writeText("{\"file_format_version\": \"1.0.0\", \"ICD\": {\"library_path\": \"$GPU_DIR/libvulkan_freedreno.so\", \"api_version\": \"1.4.0\"}}\n")
+        binds.add(Bind(icd.path, "$GPU_DIR/freedreno_icd.json"))
+        env["VK_DRIVER_FILES"] = "$GPU_DIR/freedreno_icd.json"
+        env["VK_ICD_FILENAMES"] = "$GPU_DIR/freedreno_icd.json"
+        if (!env.containsKey("MESA_LOADER_DRIVER_OVERRIDE") && !env.containsKey("GALLIUM_DRIVER")) {
+            env["MESA_LOADER_DRIVER_OVERRIDE"] = "zink"
+            env["GALLIUM_DRIVER"] = "zink"
+        }
+        // The driver's own libraries, found beside it; nothing else is in that directory.
+        env["LD_LIBRARY_PATH"] = listOf(env["LD_LIBRARY_PATH"], GPU_DIR).filter { !it.isNullOrEmpty() }.joinToString(":")
+        return binds
+    }
+
+    /**
+     * What every program in the session preloads (SessionFiles writes /etc/ld.so.preload): the
+     * session shim - SysV shared memory for X11, the network calls Android refuses - and the
+     * controller reader. A sandbox's /etc is the runtime's, so the same libraries go in through
+     * LD_PRELOAD instead, with the directory the controllers' rings live in; without them an app
+     * saw no gamepad. Both are built against an older glibc than any Flathub runtime has.
+     */
+    private fun preload(session: List<Bind>, rootfs: String, env: MutableMap<String, String>): List<Bind> {
+        val libs = FileUtils.readString(File(rootfs, "etc/ld.so.preload"))?.lines()
+            ?.map { it.trim() }?.filter { it.startsWith("/") && File(rootfs + it).isFile } ?: return emptyList()
+        if (libs.isEmpty()) return emptyList()
+        val binds = ArrayList<Bind>()
+        val paths = libs.map { lib -> "$PRELOAD_DIR/${lib.substringAfterLast('/')}".also { binds.add(Bind(rootfs + lib, it)) } }
+        env["LD_PRELOAD"] = (paths + listOfNotNull(env["LD_PRELOAD"]?.takeIf { it.isNotBlank() })).joinToString(":")
+        // The controllers: FAKE_EVDEV_DIR is <session>/dev/input, the rings beside it in <session>/dev.
+        env["FAKE_EVDEV_DIR"]?.let { File(it).parent }?.let { dev ->
+            binds.addAll(bindsFor(session, rootfs, dev, dev))
+        }
+        return binds
+    }
+
+    private const val PRELOAD_DIR = "/run/droiddeck-preload"
 
     /**
      * /proc/cpuinfo without the cores' names. Snapdragon's ARMv9 cores (Cortex-A510/A715/X3) have

@@ -98,11 +98,16 @@ def install(app_id):
     if app_ref(inst, app_id) is not None:
         emit(e="done", note="already installed")
         return 0
-    try:
-        remote_ref = inst.fetch_remote_ref_sync(REMOTE, Flatpak.RefKind.APP, app_id, arch, None, None)
-        branch = remote_ref.get_branch()
-    except GLib.Error:
-        emit(e="error", message="%s is not on Flathub for %s" % (app_id, arch))
+    # Flathub publishes apps on "stable"; libflatpak's default branch is "master".
+    branch, last = None, None
+    for candidate in ("stable", "master"):
+        try:
+            branch = inst.fetch_remote_ref_sync(REMOTE, Flatpak.RefKind.APP, app_id, arch, candidate, None).get_branch()
+            break
+        except GLib.Error as err:
+            last = err
+    if branch is None:
+        emit(e="error", message="%s is not on Flathub for %s (%s)" % (app_id, arch, last.message if last else "no branch"))
         return 1
     t, state = transaction(inst)
     t.add_install(REMOTE, "app/%s/%s/%s" % (app_id, arch, branch), None)
