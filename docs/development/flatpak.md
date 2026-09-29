@@ -13,8 +13,12 @@ would therefore reinstall about a hundred packages, Mesa among them, over the ru
 Turnip build, and run every hook in the image, mkinitcpio included. So pacman, with a
 database of its own under `/var/cache/droiddeck-flatpak`, only downloads the nine packages
 Flatpak adds to this image and checks their signatures against the Arch Linux ARM keyring.
-The script then unpacks them without hooks and checks what the binaries link. Flathub is added
-as a per-user remote.
+The script then unpacks them without hooks and checks what the binaries link. Libraries that
+the Desktop package normally brings (PyGObject, json-glib, fuse3 and others) are fetched too,
+but only when their files are missing. Flathub is added as a per-user remote from a copy of
+its `.flatpakrepo` carried in the script, so that step needs no network. Every store command
+writes its output to `Download/DroidDeck/flatpak-<verb>.log`, next to the session logs. The
+setup script also puts Flatpak's own error text in the failure message the app shows.
 
 ## bubblewrap without namespaces
 
@@ -56,8 +60,10 @@ The spawner also adds what the rootfs gives its own programs:
 ## Running apps
 
 The front end starts an app as a run-mode session of `bannerlator-flatpak-run <app-id>`, full
-screen under gamescope. Under gamescope it passes `--nosocket=wayland --socket=x11`. Otherwise
-Flatpak finds the app compositor's `wayland-0` and the window opens behind gamescope. The
+screen under gamescope. Under gamescope it passes `--nosocket=wayland --socket=x11` and sets
+`XDG_SESSION_TYPE=x11`. Otherwise Flatpak finds the app compositor's `wayland-0` and the window
+opens behind gamescope. gamescope's own Wayland socket is no alternative: Chromium on Wayland
+asks the render node it names for a DRM version, which KGSL cannot give, and aborts. The
 launcher also starts a session bus when there is none. On the Linux desktop, the apps' exported
 menu entries appear in the LXQt menu. While the desktop is composited by pixman, games are
 wrapped through `droiddeck-gpu` like the rootfs's own.

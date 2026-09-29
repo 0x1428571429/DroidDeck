@@ -271,6 +271,8 @@ object BwrapSpawner {
         val binds = ArrayList<Bind>()
         val paths = libs.map { lib -> "$PRELOAD_DIR/${lib.substringAfterLast('/')}".also { binds.add(Bind(rootfs + lib, it)) } }
         env["LD_PRELOAD"] = (paths + listOfNotNull(env["LD_PRELOAD"]?.takeIf { it.isNotBlank() })).joinToString(":")
+        // Not through ZYPAK_LD_PRELOAD to Chromium's children: the session shim's stat hooks then
+        // hide the setuid bit zypak fakes on chrome-sandbox, and Chromium refuses to start.
         // The controllers: FAKE_EVDEV_DIR is <session>/dev/input, the rings beside it in <session>/dev.
         env["FAKE_EVDEV_DIR"]?.let { File(it).parent }?.let { dev ->
             binds.addAll(bindsFor(session, rootfs, dev, dev))

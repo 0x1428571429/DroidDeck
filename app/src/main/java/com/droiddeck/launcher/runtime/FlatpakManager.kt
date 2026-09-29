@@ -96,6 +96,21 @@ object FlatpakManager {
      * [fakeRoot] is for the package tools, which refuse any uid but 0.
      */
     private fun runGuest(context: Context, argv: List<String>, fakeRoot: Boolean, onLine: (String) -> Unit): Int {
+        // Everything the command says, beside the session logs (Download/DroidDeck), so a store
+        // problem can be handed over like a session's: flatpak-setup.log, flatpak-install.log...
+        val log = try {
+            val name = "flatpak-" + (argv.getOrNull(2)?.takeIf { argv.getOrNull(1) == HELPER } ?: "setup") + ".log"
+            File(LinuxRuntime.debugLogDir().apply { mkdirs() }, name).printWriter()
+        } catch (e: Exception) { null }
+        log?.println("== ${java.util.Date()} ${argv.joinToString(" ")}")
+        try {
+            return runGuestLogged(context, argv, fakeRoot) { line -> log?.println(line); log?.flush(); onLine(line) }
+        } finally {
+            log?.close()
+        }
+    }
+
+    private fun runGuestLogged(context: Context, argv: List<String>, fakeRoot: Boolean, onLine: (String) -> Unit): Int {
         val root = LinuxRuntime.rootDir(context)
         LinuxRuntime.writeAccounts(context)
         SessionFiles.stage(context, root)
