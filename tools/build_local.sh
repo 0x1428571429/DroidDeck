@@ -89,10 +89,12 @@ linuxfs_replaced=1
 rm -rf -- "${linuxfs_dir}"
 mkdir -p "${linuxfs_dir}"
 
-# A busy daemon (another container running) can fail one inspect of an image that is there, and
-# the rebuild that follows hangs on the registry's metadata for the base image: ask a few times.
+# Docker Desktop's VM restarts now and then, and until its engine has loaded its image store it
+# answers "No such image" for images it has. The rebuild that follows hangs on the registry
+# (the base image's credentials go through docker-credential-desktop), so give a restarting daemon
+# up to a minute before deciding the image is really missing.
 image_present=0
-for _ in 1 2 3 4 5; do
+for _ in $(seq 1 30); do
     if inspect_error=$(docker image inspect "${image_name}" 2>&1 >/dev/null); then image_present=1; break; fi
     sleep 2
 done

@@ -4,6 +4,7 @@ Running engineering log for the DroidDeck app (`com.droiddeck.launcher`; called 
 `com.steamdeck.launcher`, until 2026-09-23 - entries below that date keep the old name). Newest state first, then
 the timeline, then lessons and backlog. Companion to the README (what the app *does*) and to
 `docs/releases/` (what each version said) - this is *how it got here and where it stands*.
+Performance work has its own write-up: [performance.md](performance.md).
 
 ---
 
