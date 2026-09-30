@@ -1,0 +1,71 @@
+package com.droiddeck.launcher.gpu
+
+import com.droiddeck.launcher.gpu.GpuInfo.Family
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class DriverPairsTest {
+    private fun gpu(model: Int, adreno: Boolean = true, oneUi: Boolean = false) =
+        GpuInfo("Adreno $model", model, GpuInfo.familyOf(adreno, model), "", oneUi)
+
+    private fun asset(name: String, tag: String, linux: Boolean, pair: String) =
+        TurnipReleases.Asset("src", tag, name, "https://example/$name", 3_000_000, linux, "label", "0".repeat(64), pair)
+
+    @Test
+    fun familiesFollowTheAdrenoModel() {
+        assertEquals(Family.A8XX, GpuInfo.familyOf(true, 825))
+        assertEquals(Family.A8XX, GpuInfo.familyOf(true, 810))
+        assertEquals(Family.A7XX_LOW, GpuInfo.familyOf(true, 722))
+        assertEquals(Family.A7XX, GpuInfo.familyOf(true, 740))
+        assertEquals(Family.A6XX, GpuInfo.familyOf(true, 610))
+        assertEquals(Family.ADRENO_UNKNOWN, GpuInfo.familyOf(true, 0))
+        assertEquals(Family.NOT_ADRENO, GpuInfo.familyOf(false, 0))
+    }
+
+    @Test
+    fun onlyTestedHardwareCountsAsSupported() {
+        assertEquals(GpuInfo.Support.TESTED, gpu(740).support)
+        assertEquals(GpuInfo.Support.TESTED, gpu(825).support)
+        assertEquals(GpuInfo.Support.UNTESTED, gpu(610).support)
+        assertEquals(GpuInfo.Support.UNTESTED, gpu(720).support)
+        assertEquals(GpuInfo.Support.UNSUPPORTED, gpu(0, adreno = false).support)
+    }
+
+    @Test
+    fun autoPicksWinNativeBalancedOn8xxAndBannersElsewhere() {
+        assertEquals(DriverPairs.WN_BALANCED, DriverPairs.recommendedKey(gpu(830)))
+        assertEquals(DriverPairs.WN_BALANCED, DriverPairs.recommendedKey(gpu(825)))
+        assertEquals(DriverPairs.BANNER, DriverPairs.recommendedKey(gpu(740)))
+        assertEquals(DriverPairs.BANNER_ONEUI, DriverPairs.recommendedKey(gpu(740, oneUi = true)))
+        assertEquals(DriverPairs.BANNER_710, DriverPairs.recommendedKey(gpu(720)))
+        assertEquals(DriverPairs.BANNER, DriverPairs.recommendedKey(gpu(650)))
+        assertNull(DriverPairs.recommendedKey(gpu(0, adreno = false)))
+    }
+
+    @Test
+    fun pairsMatchHalvesAndNeverMixBannersReleases() {
+        val check = TurnipReleases.Check(
+            listOf(
+                asset("Turnip-r4.zip", "r4", false, DriverPairs.BANNER),
+                asset("Turnip-r4-Linux.zip", "r4", true, DriverPairs.BANNER),
+                // The A8xx set's newest display build is r4, but its Linux half is only in r3.
+                asset("Turnip-r4-A8xx.zip", "r4", false, DriverPairs.BANNER_A8XX),
+                asset("Turnip-r3-A8xx-Linux.zip", "r3", true, DriverPairs.BANNER_A8XX),
+                asset("WN-Turnip-1.19-b_Axxx.zip", "v1.19", false, DriverPairs.WN_BALANCED),
+                asset("WN-Linux-Turnip-0.1.2-b_Axxx.zip", "linux-v0.1.2", true, DriverPairs.WN_BALANCED),
+            ),
+            emptyList(), emptyList(), 0L,
+        )
+        val pairs = DriverPairs.from(check).associateBy { it.key }
+        assertTrue(pairs.getValue(DriverPairs.BANNER).complete)
+        assertFalse("halves from two releases are not a pair", pairs.getValue(DriverPairs.BANNER_A8XX).complete)
+        val wn = pairs.getValue(DriverPairs.WN_BALANCED)
+        assertTrue("WinNative's two release lines pair up", wn.complete)
+        assertEquals("v1.19 + v0.1.2", wn.version)
+        assertTrue(wn.suits(gpu(830)))
+        assertFalse(pairs.getValue(DriverPairs.BANNER).suits(gpu(830)))
+    }
+}
