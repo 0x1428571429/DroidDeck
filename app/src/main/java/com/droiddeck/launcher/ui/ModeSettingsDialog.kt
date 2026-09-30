@@ -51,6 +51,8 @@ class ModeSettings(
     val hdrReason: String?,
     /** The GPU drivers in use, as the row that opens them on the Components page says it. */
     val gpuDrivers: String = "Auto",
+    /** Frames per second the session is capped at; 0 = none. */
+    val fpsLimit: Int = 0,
     val touchMode: String,
     val suspendPolicy: String,
     /** Steam only. */
@@ -102,6 +104,7 @@ class ModeSettingsActions(
     val onHdr: (Boolean) -> Unit,
     /** Opens the GPU drivers on the Components page: they are shared by every session. */
     val onGpuDrivers: () -> Unit = {},
+    val onFpsLimit: (Int) -> Unit = {},
     val onTouch: (String) -> Unit,
     val onSuspendPolicy: (String) -> Unit,
     val onOsc: (String) -> Unit,
@@ -167,6 +170,12 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 host, "shape", "Screen ratio",
                 if (custom != null) "Set by the custom resolution." else "Auto uses at least 16:9.",
                 com.droiddeck.launcher.session.SessionPrefs.shapeChoices, s.shapeMode, enabled = custom == null, onPick = a.onShape,
+            )
+            ChoiceRow(
+                host, "fps", "Frame limit", "Applies next session.",
+                com.droiddeck.launcher.session.SessionPrefs.fpsLimitChoices, s.fpsLimit,
+                note = "Caps the whole session. The screen switches to a rate the cap divides evenly.",
+                onPick = a.onFpsLimit,
             )
             if (editCustom) CustomResolutionDialog(
                 initial = custom,

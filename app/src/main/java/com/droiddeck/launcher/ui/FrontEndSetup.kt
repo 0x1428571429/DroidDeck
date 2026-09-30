@@ -59,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalInputModeManager
@@ -73,6 +74,7 @@ import com.droiddeck.launcher.core.DeviceSupport
 import com.droiddeck.launcher.core.PhantomProcessLimit
 import com.droiddeck.launcher.core.PhantomProcessStatus
 import com.droiddeck.launcher.session.SessionPrefs
+import com.droiddeck.launcher.R
 
 // The Setup page: runtime and device checks, tools, frame generation and launch settings.
 
@@ -279,7 +281,7 @@ internal fun SetupPanel(
                                     true to SessionPrefs.BACK_QAM_THEN_MENU,
                                 ), s.backActionsInverted, onPick = a.onBackActionsInverted,
                             )
-                            SettingsRow("Frame generation", "Select the frame generation mode") {
+                            SettingsRow(stringResource(R.string.frame_gen_title), stringResource(R.string.frame_gen_hint)) {
                                 Box {
                                     ValueChip(s.frameGenLabel, host.open == "fg") { host.open = if (host.open == "fg") null else "fg" }
                                     FrameGenMenu(s, a, host)
@@ -380,7 +382,7 @@ private fun ToolCard(t: ToolSpec, modifier: Modifier) {
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(Shape14)
             .background(if (hot) pal.signal.copy(alpha = 0.10f) else colors.surface)
-            .border(if (hot) 2.dp else 1.dp, if (hot) pal.signal else pal.line, Shape14)
+            .glideBorder(hot, Shape14, pal.signal, pal.line)
             .hoverable(src).clickable(interactionSource = src, indication = LocalIndication.current, role = Role.Button, onClick = t.onClick)
             .controllerConfirm(onClick = t.onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -393,7 +395,7 @@ private fun ToolCard(t: ToolSpec, modifier: Modifier) {
 
 @Composable
 private fun FrameGenMenu(s: FrontEndState, a: FrontEndActions, host: MenuHost) {
-    FrameGenMenu(host, s.frameGenEngine, s.frameGenMultiplier, s.lsfgReady, a.onFrameGenPick)
+    FrameGenMenu(host, s.frameGen, s.lossless, a.onFrameGenPick, a.onImportLossless)
 }
 
 /**
@@ -409,7 +411,7 @@ internal fun LaunchSettings(s: FrontEndState, a: FrontEndActions, host: MenuHost
         add { m -> SettingCard("Components", "FEX, DXVK, VKD3D", "card:components", m) { a.onComponents(true) } }
         add { m ->
             Box(m) {
-                SettingCard("Frame generation", s.frameGenLabel, "card:fg", Modifier.fillMaxSize()) {
+                SettingCard(stringResource(R.string.frame_gen_title), s.frameGenLabel, "card:fg", Modifier.fillMaxSize()) {
                     host.open = if (host.open == "fg") null else "fg"
                 }
                 FrameGenMenu(s, a, host)
@@ -435,14 +437,13 @@ private fun SettingCard(label: String, value: String, id: String, modifier: Modi
     val hot = rememberHot(src)
     val pressed by src.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.97f else 1f, Motion.sp(0.5f, Spring.StiffnessMedium), label = "cardScale")
-    val edge by animateColorAsState(if (hot) pal.signal else pal.line2, Motion.tw(220), label = "cardEdge")
     Column(
         verticalArrangement = Arrangement.spacedBy(3.dp),
         modifier = modifier.paneItem(id)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(Shape14)
             .background(if (hot) pal.signal.copy(alpha = 0.10f) else colors.surface)
-            .border(if (hot) 2.dp else 1.dp, edge, Shape14)
+            .glideBorder(hot, Shape14, pal.signal, pal.line2)
             .hoverable(src).clickable(interactionSource = src, indication = LocalIndication.current, role = Role.Button, onClick = onClick)
             .controllerConfirm(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
