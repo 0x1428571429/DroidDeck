@@ -317,10 +317,6 @@ internal fun SetupPanel(
                             ToggleRow(host, "logs", "Session logs", "Saved after each session", s.logsEnabled) { a.onLogs() }
                             ActionRow("Latest session logs", "Send them with a bug report", "Share logs", a.onShareLogs)
                         }
-                        SettingsGroup("About") {
-                            ActionRow("Build", s.buildLabel, "Check for newer", a.onCheckLatestBuild)
-                            ActionRow("Credits", "The people and projects DroidDeck builds on", "View", a.onCredits)
-                        }
                     }
                 }
             }

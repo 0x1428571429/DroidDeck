@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import com.droiddeck.launcher.HomeApp
 import com.droiddeck.launcher.frontend.Library
 import com.droiddeck.launcher.gpu.FrameGen
+import com.droiddeck.launcher.gpu.Lossless
 import com.droiddeck.launcher.input.SecondScreenDisplay
 import com.droiddeck.launcher.core.PhantomProcessLimit
 import com.droiddeck.launcher.core.PhantomProcessStatus
@@ -91,9 +92,8 @@ class FrontEndState(
     val steamGames: List<Library.SteamGame>,
     val emulators: List<Library.Emulator>,
     val running: String?,
-    val frameGenEngine: String = FrameGen.ENGINE_OFF,
-    val frameGenMultiplier: Int = 2,
-    val lsfgReady: Boolean = false,
+    val frameGen: FrameGen.Mode = FrameGen.Mode.OFF,
+    val lossless: Lossless.State = Lossless.State.NONE,
     val pageKey: String? = null,
     val theme: String = Themes.GRAPHITE,
     val isHomeApp: Boolean = false,
@@ -117,6 +117,8 @@ class FrontEndState(
     /** Beta features the user turns on in Setup: the Flathub Store and AppImage import. */
     val storeEnabled: Boolean = false,
     val appImagesEnabled: Boolean = false,
+    /** The Updates page: DroidDeck's own builds and the channel followed. */
+    val updates: UpdatesState = UpdatesState(),
 )
 
 class FrontEndActions(
@@ -137,7 +139,8 @@ class FrontEndActions(
     val onInstallPackage: (String) -> Unit,
     val onRemovePackage: (String) -> Unit,
     val onRuntime: () -> Unit,
-    val onFrameGenPick: (engine: String, multiplier: Int) -> Unit,
+    val onFrameGenPick: (FrameGen.Mode) -> Unit,
+    val onImportLossless: () -> Unit,
     val onProtons: () -> Unit,
     /** The Components page: FEX / DXVK / VKD3D-Proton per Proton. */
     val onComponents: (focusContent: Boolean) -> Unit,
@@ -150,7 +153,6 @@ class FrontEndActions(
     val onBrowseFiles: (File) -> Unit = {},
     val onLogs: () -> Unit,
     val onShareLogs: () -> Unit = {},
-    val onCredits: () -> Unit,
     val onPageBack: () -> Unit = {},
     val onTheme: (String) -> Unit = {},
     val onLauncherFullscreen: (Boolean) -> Unit = {},
@@ -160,7 +162,6 @@ class FrontEndActions(
     val onHomeScreen: (Boolean) -> Unit = {},
     val onAndroidApp: (HomeApp.LaunchableApp, Int?) -> Unit = { _, _ -> },
     val onBackActionsInverted: (Boolean) -> Unit = {},
-    val onCheckLatestBuild: () -> Unit = {},
     val onRefreshPhantomStatus: () -> Unit = {},
     val onOpenDeveloperOptions: (Int?) -> Unit = {},
     val onWirelessAdbPair: (String, Int, String, (String?) -> Unit) -> Unit = { _, _, _, done -> done("Wireless debugging is unavailable") },
@@ -172,6 +173,7 @@ class FrontEndActions(
     val onStartWirelessAdbPairing: () -> Unit = {},
     val onOpenNotificationSettings: () -> Unit = {},
     val controller: ControllerActions? = null,
+    val updates: UpdatesActions = UpdatesActions(),
 )
 
 internal object Motion {
