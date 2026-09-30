@@ -33,13 +33,14 @@ object TurnipReleases {
      * [pair] names the matched set an asset belongs to (DriverPairs): a display build and a Linux
      * build of the same pair are made to run together. "" for a list cached before pairs were kept.
      */
+    /** [bundle]: one zip holding both halves of the pair (DriverBundle); [linux] is false for it. */
     class Asset(val source: String, val tag: String, val name: String, val url: String, val size: Long, val linux: Boolean, val label: String,
-                val sha256: String = "", val pair: String = "")
+                val sha256: String = "", val pair: String = "", val bundle: Boolean = false)
     /** [latest] = each source's newest release tag, for the refresh line. */
     class Check(val assets: List<Asset>, val latest: List<Pair<String, String>>, val failed: List<String>, val checkedAt: Long)
 
     /** What an asset is: a Linux build or not, the menu label, and the pair it belongs to. */
-    private class Kind(val linux: Boolean, val label: String, val pair: String)
+    private class Kind(val linux: Boolean, val label: String, val pair: String, val bundle: Boolean = false)
 
     private class Source(val label: String, val repo: String, val classify: (name: String, tag: String) -> Kind?)
 
@@ -68,6 +69,12 @@ object TurnipReleases {
             val flavour = when (m.groupValues[2]) { "b" -> "Balanced"; "p" -> "Performance"; else -> m.groupValues[2] }
             val gpus = if (m.groupValues[3] == "Axxx") "all Adreno" else m.groupValues[3]
             Kind(m.groupValues[1].isNotEmpty(), "$gpus · $flavour", "wn-" + m.groupValues[2])
+        },
+        // DD-Turnip-v<ver>.zip: DroidDeck's own all-in-one build, both halves in one zip, published
+        // to Drivers-CI (releases only). Every release is offered, not just the newest, each its own pair.
+        Source("DroidDeck", "Droid-Deck/Drivers-CI") { name, tag ->
+            if (!Regex("""^DD-Turnip-v\d+\.\d+\.\d+\.zip$""").matches(name)) return@Source null
+            Kind(false, "Android + Linux · all Adreno", DriverPairs.ddTurnip(tag), bundle = true)
         },
     )
 
@@ -101,15 +108,18 @@ object TurnipReleases {
                         val a = list.getJSONObject(j)
                         val name = a.getString("name")
                         val kind = src.classify(name, tag) ?: continue
+                        // A bundle is only offered from an official release, never a pre-release.
+                        if (kind.bundle && r.optBoolean("prerelease")) continue
                         val linux = kind.linux
                         val label = kind.label
                         // Only assets GitHub has a sha256 for are offered: the download is checked against it.
                         val sha = Hashes.githubSha256(a.optString("digest")) ?: continue
                         // Newest first: the first release carrying a variant is the one offered.
-                        if (!seen.add("$linux|$label")) continue
+                        if (!seen.add(if (kind.bundle) kind.pair else "$linux|$label")) continue
                         assets.put(JSONObject().put("source", src.label).put("tag", tag).put("name", name)
                             .put("url", a.getString("browser_download_url")).put("size", a.optLong("size"))
-                            .put("linux", linux).put("label", label).put("sha256", sha).put("pair", kind.pair))
+                            .put("linux", linux).put("label", label).put("sha256", sha).put("pair", kind.pair)
+                            .put("bundle", kind.bundle))
                     }
                 }
                 if (newest != null) latest.put(JSONObject().put("source", src.label).put("tag", newest))
@@ -147,7 +157,8 @@ object TurnipReleases {
         for (i in 0 until list.length()) {
             val a = list.getJSONObject(i)
             out.add(Asset(a.getString("source"), a.getString("tag"), a.getString("name"), a.getString("url"),
-                a.optLong("size"), a.getBoolean("linux"), a.getString("label"), a.optString("sha256", ""), a.optString("pair", "")))
+                a.optLong("size"), a.getBoolean("linux"), a.getString("label"), a.optString("sha256", ""), a.optString("pair", ""),
+                a.optBoolean("bundle", false)))
         }
         val latest = ArrayList<Pair<String, String>>()
         val l = json.optJSONArray("latest") ?: JSONArray()
