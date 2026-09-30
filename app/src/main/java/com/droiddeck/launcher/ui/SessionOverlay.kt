@@ -524,7 +524,7 @@ private fun StopSessionButton(modifier: Modifier = Modifier, onClick: () -> Unit
     Row(
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = modifier.heightIn(min = 44.dp).semantics { contentDescription = "Stop session" }
-            .clip(shape).background(fill).border(if (hot) 2.dp else 1.dp, colors.error.copy(alpha = if (hot) 0.9f else 0.55f), shape)
+            .clip(shape).background(fill).glideBorder(hot, shape, colors.error.copy(alpha = 0.9f), colors.error.copy(alpha = 0.55f))
             .hoverable(src).clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick)
             .controllerConfirm(onClick = onClick)
             .padding(start = 12.dp, end = 14.dp),
@@ -549,7 +549,7 @@ private fun QuickAction(
     val shape = RoundedCornerShape(12.dp)
     val tile = modifier.height(if (compact) 44.dp else 64.dp).clip(shape)
         .background(if (hot) pal.signal.copy(alpha = 0.14f) else colors.surface)
-        .border(if (hot) 2.dp else 1.dp, if (hot) pal.signal else pal.line, shape)
+        .glideBorder(hot, shape, pal.signal, pal.line)
         .hoverable(interactionSource)
         .clickable(interactionSource = interactionSource, indication = LocalIndication.current, onClick = onClick)
         .controllerConfirm(onClick = onConfirm ?: onClick)
@@ -580,7 +580,7 @@ private fun DrawerBumper(label: String, description: String, modifier: Modifier 
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier.size(44.dp).clip(ring)
-            .border(2.dp, if (hot) pal.signal else Color.Transparent, ring)
+            .glideBorder(hot, ring, pal.signal)
             .hoverable(src).clickable(interactionSource = src, indication = null, onClick = onClick)
             .controllerConfirm(onClick = onClick)
             .semantics { contentDescription = description },
@@ -639,7 +639,7 @@ private fun DrawerPageTabs(page: Int, modifier: Modifier = Modifier, compact: Bo
                             listOf(pal.signal.copy(alpha = 0.34f * glow), pal.signal.copy(alpha = 0.10f * glow), Color.Transparent),
                         ),
                     )
-                    .border(if (focused) 2.dp else 0.dp, if (focused) colors.onBackground else Color.Transparent, RoundedCornerShape(16.dp))
+                    .glideBorder(focused, RoundedCornerShape(16.dp), colors.onBackground)
                     .semantics { contentDescription = "${drawerPageTitles[index]} page" }
                     .hoverable(source)
                     .clickable(interactionSource = source, indication = LocalIndication.current, onClick = select)
