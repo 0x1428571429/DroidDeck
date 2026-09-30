@@ -75,3 +75,39 @@ AppStream details. `bannerlator-flatpak` drives libflatpak through PyGObject and
 JSON object per line (`op`, `progress`, `error`, `done`). `FlatpakManager` turns those lines
 into the store's progress bar. Store commands run in a proot of their own, and
 `OrphanReaper` spares them when a session starts.
+
+## AppImages
+
+"Add AppImage" on the Desktop page imports an ARM64, type 2 AppImage from storage. `AppImageManager`
+checks its ELF header first, so an x86_64 image is refused with a message saying so. It then copies the
+image in, because shared storage is noexec, and extracts it once to `/opt/appimages/user/<id>/app`.
+proot has no FUSE, and extracting at every start would cost the whole image each time. The name,
+comment and icon come from the image's own desktop entry. A menu entry goes to
+`/usr/local/share/applications`, where the desktop's GPU wrapper picks it up.
+
+`bannerlator-appimage-run` starts it:
+
+- `APPIMAGE` stays unset, so apps don't offer to add themselves to the menu or update in place.
+- Firefox forks get the same sandbox switches as Flatpaks.
+- Electron apps (a `chrome-sandbox` beside them) get `--no-sandbox` and X11.
+- A session bus is started when the session has none.
+- The launcher waits while anything from the image still runs, because Electron apps relaunch themselves.
+
+Known to fail:
+
+- Obsidian's own AppImage traps (SIGTRAP) after startup. Its Flatpak works.
+- Zen's AppImage hangs in Firefox's startup GPU probe. The Firefox Flatpak works.
+
+## x86_64 apps
+
+Flathub lists x86_64-only apps (Heroic, Discord, Spotify, Steam), and the store hides them. Running them
+would need an x86 emulator in the sandbox. There's no FEX or box64 package in Arch Linux ARM; Valve's
+ARM64 Steam can install its FEX compatibility tool, but only through the Steam client. With a FEX binary
+available, the path would be:
+
+1. `flatpak install --arch=x86_64`. Flatpak accepts it, and the x86 runtime is also the x86 root FEX needs.
+2. `BwrapSpawner` starts those sandboxes with `proot -q`, through a small wrapper that runs FEXInterpreter.
+   `-q` passes QEMU-style arguments.
+3. GPU drivers would need FEX's thunks, or Mesa runs emulated on the CPU.
+
+x86 AppImages would also need an x86 rootfs for the libraries they don't bundle.
