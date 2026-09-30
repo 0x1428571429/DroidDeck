@@ -91,7 +91,6 @@ public final class WaylandCompositor {
             long smoothed = frameIntervalNanos;
             frameIntervalNanos = smoothed == 0 ? interval : (smoothed * 3 + interval) / 4;
         }
-        com.droiddeck.launcher.session.PerfHints.onFrame();
         GameListener l = gameListener;
         if (l != null) l.onGameFrame();
     }
@@ -208,6 +207,9 @@ public final class WaylandCompositor {
      */
     public static native int nativeCursorSnapshot(int[] out);
 
+    /** The serial {@link #nativeCursorSnapshot} would report, without copying the image. */
+    public static native int nativeCursorSerial();
+
     /** Enough for the header plus a 256x256 cursor, the largest the compositor snapshots. */
     public static final int CURSOR_BUF_INTS = 6 + 256 * 256;
 
@@ -218,7 +220,7 @@ public final class WaylandCompositor {
      *  once per tick, so games run unthrottled and the screen shows their latest frame. */
     public static native void nativeVsync(long frameTimeNanos);
 
-    /** The compositor thread's Linux tid, or 0 before it has started (see PerfHints). */
+    /** The compositor thread's Linux tid, or 0 before it has started. */
     public static native int nativeCompositorTid();
 
     /** Shortcut launches: don't draw explorer's windows (desktop, taskbar, Start menu), matching the
@@ -435,6 +437,14 @@ public final class WaylandCompositor {
      *  back to the game, like the X11 IdleNotify pacer, so the game itself slows to the cap. */
     public static native void nativeSetFpsLimit(int fps);
 
+    /** KGSL power control off (true: the GPU held at its top clock) or back on. Device-wide and
+     *  outlives the process; see {@code GpuClockPin}. A no-op without /dev/kgsl-3d0. */
+    public static native void nativeSetGpuTurbo(boolean on);
+
+    /** setpriority() on one of our own processes or threads, only ever raising it (no cgroup move,
+     *  unlike android.os.Process.setThreadPriority). Returns the nice it is left at; 100 = unknown. */
+    public static native int nativeRaisePriority(int tid, int nice);
+
     /** Inject the app's X-server input in scene (virtual desktop) pixels. type 2 = move to a,b;
      *  3 = evdev button a (BTN_LEFT=0x110…) pressed (b=1) or released (b=0); 4 = a wheel steps,
      *  negative = up. */
@@ -451,10 +461,12 @@ public final class WaylandCompositor {
     public static native void nativeSetFrameGenEngine(int kind);
 
     /** Arm (multiplier 2..4: one real frame plus multiplier-1 interpolated ones per game frame) or
-     *  disarm. Generated frames are presented ahead of the real frame on consecutive vblanks. */
-    public static native void nativeSetFrameGenArmed(boolean armed, int multiplier);
+     *  disarm. A targetFps above 0 makes LSFG adaptive instead: it generates 0..3 frames per game
+     *  frame, whatever reaches that rate. Generated frames are presented ahead of the real frame
+     *  on consecutive vblanks. */
+    public static native void nativeSetFrameGenArmed(boolean armed, int multiplier, int targetFps);
 
-    /** LSFG Native: the SPIR-V cache built from the user's Lossless.dll ({@code LsfgNative.cacheFile}). */
+    /** LSFG Native: the SPIR-V cache built from the user's Lossless.dll ({@code Lossless.cacheFile}). */
     public static native void nativeSetLsfgCachePath(String path);
 
     /** Flow scale (0.25-1.0) and the panel's real refresh rate (the pacer never generates above it). */

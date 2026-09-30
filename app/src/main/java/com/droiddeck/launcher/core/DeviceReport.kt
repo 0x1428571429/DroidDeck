@@ -118,19 +118,24 @@ object DeviceReport {
         k("Foldable", context.packageManager.hasSystemFeature("android.hardware.sensor.hinge_angle"))
 
         h("Drivers")
+        val gpu = com.droiddeck.launcher.gpu.GpuInfo.detect()
+        k("GPU", "${gpu.name} · ${gpu.family.label} · ${gpu.supportText}" + if (gpu.oneUi8Gen2) " · One UI 8 Gen 2" else "")
+        k("Driver mode", SessionPrefs.gpuDriverMode(context) +
+            (com.droiddeck.launcher.gpu.DriverPairs.recommendedKey(gpu, com.droiddeck.launcher.gpu.DriverPairs.from(
+                com.droiddeck.launcher.gpu.TurnipReleases.cached(context)))?.let { " (recommended pair: $it)" } ?: ""))
         val turnip = TurnipDriver(context)
         val androidChoice = SessionPrefs.androidDriver(context)
         k("Display driver (chosen)", if (androidChoice.isEmpty()) "Auto -> ${turnip.autoId()}" else androidChoice)
         k("  name / version", "${turnip.displayName(if (androidChoice.isEmpty()) turnip.autoId() else androidChoice)} ${turnip.driverVersion(if (androidChoice.isEmpty()) turnip.autoId() else androidChoice)}".trim())
         k("  imported available", turnip.enumerateImported().ifEmpty { listOf("none") }.joinToString(", "))
         val lm = LinuxVulkanDriverManager(context)
-        for (m in listOf(SessionService.MODE_STEAM, SessionService.MODE_DESKTOP)) {
-            val id = SessionPrefs.linuxDriver(context, m)
+        run {
+            val id = SessionPrefs.linuxDriver(context)
             val label = if (id.isEmpty()) "runtime default (the Turnip built into the runtime)"
             else "${lm.getDriverName(id)} ${lm.getDriverVersion(id)}".trim() +
                 lm.getMinGlibc(id).let { if (it.isEmpty()) "" else " (glibc $it+)" } +
                 if (lm.isInstalled(id)) "" else "  [MISSING - falls back to the runtime's own]"
-            k("Linux driver ($m)", label)
+            k("Linux driver", label)
         }
         k("Runtime's own ICD", LinuxRuntime.vulkanIcd(context)?.path)
 
@@ -149,8 +154,10 @@ object DeviceReport {
         k("Threaded GL (glthread)", SessionPrefs.glThread(context))
         k("No GL error checks", SessionPrefs.noGlError(context))
         k("Steam Deck mode", SessionPrefs.steamDeckMode(context))
+        k("Steam controller", SessionPrefs.steamController(context))
         k("FEX preset", SessionPrefs.fexPreset(context).ifEmpty { "FEX defaults" })
         k("Skip xalia", SessionPrefs.noXalia(context))
+        k("gamescope realtime", SessionPrefs.gamescopeRealtime(context))
         k("proot without seccomp", SessionPrefs.prootNoSeccomp(context))
         k("Guest host name", SessionPrefs.guestHostname(context))
         k("DirectAudio for games", SessionPrefs.directAudio(context))

@@ -436,9 +436,16 @@ static int on_release_timer(int fd, uint32_t mask, void *data) {
  * delivered (a swapchain rebuild destroys buffers with queued releases) or that a coarser earlier
  * limit had spaced out, and the game's first frames after that waited on empty slots. */
 static void release_buffer(struct surface *s, struct wl_resource *buffer, int64_t since_ns) {
-    int limit = g_fps_limit;
-    if (limit <= 0 || g_release_timer_fd < 0) { wl_buffer_send_release(buffer); perf_note_release(since_ns); return; }
-    int64_t interval = 1000000000LL / limit, now = now_ns();
+    const int limit = g_fps_limit;
+    /* Without a limit of its own a game is paced to the screen. A swapchain that does not wait for
+     * frame callbacks (MAILBOX, IMMEDIATE) is held back by nothing else here, so handing a replaced
+     * buffer straight back let it draw as fast as the GPU allowed and everything above the refresh
+     * rate was thrown away - 178 frames a second for 91 on screen, measured (WinNative, maxjivi05).
+     * One release per refresh is the back-pressure X11 gives, and the screen shows the same frames
+     * either way. */
+    const int64_t interval = limit > 0 ? 1000000000LL / limit : g_refresh_ns;
+    if (interval <= 0 || g_release_timer_fd < 0) { wl_buffer_send_release(buffer); perf_note_release(since_ns); return; }
+    int64_t now = now_ns();
     int64_t at = s->next_release_ns + interval;
     int64_t latest = now + interval * (int64_t)(s->releases_pending + 1);
     if (at < now) at = now;
@@ -533,6 +540,13 @@ static void cursor_publish_shm(struct wl_shm_buffer *shm, int hx, int hy) {
     wl_shm_buffer_begin_access(shm);
     cursor_publish_pixels((const uint8_t *)wl_shm_buffer_get_data(shm), w, h, (size_t)stride, hx, hy);
     wl_shm_buffer_end_access(shm);
+}
+
+/* The serial alone, without the lock: the app asks on every pointer move, and the snapshot below
+ * copies up to 256 KB of pixels across JNI and holds the lock the compositor thread takes to
+ * change the cursor. A torn read is only a missed or an extra snapshot. */
+int banner_cursor_serial(void) {
+    return __atomic_load_n(&g_cursor_serial, __ATOMIC_RELAXED);
 }
 
 /* Read by the app (UI thread). out = [serial, hidden, w, h, hotspotX, hotspotY, pixels...].

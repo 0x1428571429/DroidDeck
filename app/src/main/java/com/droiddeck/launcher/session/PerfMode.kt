@@ -4,7 +4,6 @@ import android.app.Activity
 import android.app.GameManager
 import android.app.GameState
 import android.os.Build
-import android.os.PowerManager
 import android.util.Log
 
 /**
@@ -13,10 +12,13 @@ import android.util.Log
  * The manifest already makes the app a game (appCategory + game_mode_config); this is the
  * per-window half, applied when the session activity is created:
  *
- *  - sustained performance mode (Android 7+): a clock floor that does not throttle away after
- *    two minutes, which suits an hour in Big Picture better than a boost that fades;
+ *  - NOT sustained performance mode: on Pixel and Qualcomm power HALs it caps the CPU and GPU at
+ *    a level the device can hold indefinitely rather than holding a floor, which cost games and
+ *    Big Picture their peak clocks. WinNative never asks for it; the thermal budget is left to
+ *    the game;
  *  - the panel's fastest mode at its current size (Android 6+): a 120 Hz phone is switched to
- *    120 Hz for the menu, not only when a game votes for it;
+ *    120 Hz for the menu, not only when a game votes for it. With a frame cap, the fastest mode
+ *    the cap divides evenly, so every capped frame is shown for the same number of refreshes;
  *  - GameManager's game state (Android 13+): "in gameplay", so an OEM framework that releases
  *    its boost on loading screens or menus keeps it up.
  *
@@ -26,26 +28,20 @@ import android.util.Log
 object PerfMode {
     private const val TAG = "PerfMode"
 
-    fun apply(a: Activity): String {
-        val parts = ArrayList<String>(3)
-
-        // Sustained performance mode.
-        parts += if (Build.VERSION.SDK_INT >= 24) {
-            val pm = a.getSystemService(PowerManager::class.java)
-            if (pm?.isSustainedPerformanceModeSupported == true) {
-                try { a.window.setSustainedPerformanceMode(true); "sustained mode on" } catch (t: Throwable) { Log.w(TAG, "sustained mode", t); "sustained mode refused" }
-            } else "sustained mode unsupported"
-        } else "sustained mode needs Android 7"
+    fun apply(a: Activity, fpsLimit: Int = 0): String {
+        val parts = ArrayList<String>(2)
 
         // The fastest display mode at the panel's current size.
         parts += try {
             val display = if (Build.VERSION.SDK_INT >= 30) a.display else @Suppress("DEPRECATION") a.windowManager.defaultDisplay
             if (display == null || Build.VERSION.SDK_INT < 23) "display mode unchanged" else {
                 val cur = display.mode
-                val best = display.supportedModes
+                val sameSize = display.supportedModes
                     .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
-                    .maxByOrNull { it.refreshRate }
-                if (best != null && best.modeId != cur.modeId && best.refreshRate > cur.refreshRate + 0.5f) {
+                val best = sameSize.filter { cadenceFits(it.refreshRate, fpsLimit) }.maxByOrNull { it.refreshRate }
+                    ?: sameSize.maxByOrNull { it.refreshRate }
+                if (best != null && best.modeId != cur.modeId &&
+                    (best.refreshRate > cur.refreshRate + 0.5f || !cadenceFits(cur.refreshRate, fpsLimit))) {
                     a.window.attributes = a.window.attributes.apply { preferredDisplayModeId = best.modeId }
                     "display ${cur.refreshRate.toInt()} → ${best.refreshRate.toInt()} Hz (mode ${best.modeId})"
                 } else "display ${cur.refreshRate.toInt()} Hz"
@@ -70,5 +66,12 @@ object PerfMode {
         } else "game mode needs Android 12"
 
         return parts.joinToString(" · ")
+    }
+
+    /** A panel rate that shows every capped frame for a whole number of refreshes (no cap: any). */
+    fun cadenceFits(hz: Float, fpsLimit: Int): Boolean {
+        if (fpsLimit <= 0) return true
+        val ratio = hz / fpsLimit
+        return ratio >= 0.98f && Math.abs(ratio - Math.round(ratio)) < 0.02f
     }
 }
