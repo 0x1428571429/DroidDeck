@@ -7,15 +7,22 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.droiddeck.launcher.session.SessionPrefs
 
 class CoreRow(val core: Int, val label: String)
 
@@ -29,18 +36,22 @@ fun PerformancePage(
     zinkLazy: Boolean,
     glThread: Boolean,
     noGlError: Boolean,
-    steamDeckMode: Boolean,
     noXalia: Boolean,
+    gamescopeRealtime: Boolean,
+    gpuClockPin: Boolean,
     prootNoSeccomp: Boolean,
+    guestHostname: String,
     phantomWarning: String?,
     onClientOverride: (Boolean) -> Unit,
     onTuSysmem: (Boolean) -> Unit,
     onZinkLazy: (Boolean) -> Unit,
     onGlThread: (Boolean) -> Unit,
     onNoGlError: (Boolean) -> Unit,
-    onSteamDeckMode: (Boolean) -> Unit,
     onNoXalia: (Boolean) -> Unit,
+    onGamescopeRealtime: (Boolean) -> Unit,
+    onGpuClockPin: (Boolean) -> Unit,
     onProotNoSeccomp: (Boolean) -> Unit,
+    onGuestHostname: (String) -> Unit,
     onClientCore: (Int, Boolean) -> Unit,
     onGameCore: (Int, Boolean) -> Unit,
     onDismiss: () -> Unit,
@@ -50,7 +61,7 @@ fun PerformancePage(
     val coreItems = cores.map { it.core to it.label }
     SettingsPage(
         host, title = "Performance",
-        lede = "CPU cores and session fixes. Applies next session.",
+        lede = "CPU cores, session fixes and the host name. Applies next session.",
         onBack = onDismiss,
     ) {
         SettingsGroup("Steam client cores") {
@@ -79,7 +90,7 @@ fun PerformancePage(
             )
             ToggleRow(
                 host, "zink", "Zink: lazy descriptors",
-                "Recommended for drivers without descriptor buffers.",
+                "Lazy, compact descriptors. Recommended for drivers without descriptor buffers.",
                 zinkLazy, onChange = onZinkLazy,
             )
             ToggleRow(
@@ -88,20 +99,27 @@ fun PerformancePage(
                 noGlError, onChange = onNoGlError,
             )
             ToggleRow(
-                host, "deck", "Steam Deck mode",
-                "Runs the client with -droiddeck. SteamOS helpers and battery info are provided.",
-                steamDeckMode, onChange = onSteamDeckMode,
+                host, "gsrealtime", "gamescope: realtime GPU queue",
+                "Gives the compositor's GPU work priority over the game's. Can smooth frame pacing, but can cost games GPU time.",
+                gamescopeRealtime, onChange = onGamescopeRealtime,
+            )
+        }
+        SettingsGroup("GPU") {
+            ToggleRow(
+                host, "gpuclock", "Hold the GPU at its top clock",
+                "Adreno only. Fewer hitches from the clock ramping up, at the cost of battery and heat. Released when the session ends.",
+                gpuClockPin, onChange = onGpuClockPin,
             )
         }
         SettingsGroup("Session fixes") {
             ToggleRow(
                 host, "sysmem", "Turnip: sysmem rendering",
-                "Required on Adreno 710/720/722. May fix corruption on other Adreno GPUs, but can reduce performance.",
+                "On by default: faster for the Steam interface and most games. Required on Adreno 710/720/722.",
                 tuSysmem, onChange = onTuSysmem,
             )
             ToggleRow(
                 host, "xalia", "Skip Steam's xalia helper",
-                "Disables Proton's gamepad navigation helper. Try if sessions crash at startup.",
+                "Disables Proton's gamepad navigation helper, which costs every game CPU time. Turn off only if a game needs it.",
                 noXalia, onChange = onNoXalia,
             )
             ToggleRow(
@@ -109,6 +127,25 @@ fun PerformancePage(
                 "May fix missing syscall errors on some kernels, but can reduce performance.",
                 prootNoSeccomp, onChange = onProotNoSeccomp,
             )
+        }
+        SettingsGroup("Session identity") {
+            var draft by remember(guestHostname) { mutableStateOf(guestHostname) }
+            val valid = SessionPrefs.validGuestHostname(draft) != null
+            SettingsRow(
+                "Host name",
+                if (valid || draft.isBlank()) "What the session and Steam report as this machine's name. Blank restores ${SessionPrefs.DEFAULT_GUEST_HOSTNAME}."
+                else "Letters, digits and inner hyphens only, up to 63 characters. Not saved until it is valid.",
+            ) {
+                OutlinedTextField(
+                    draft, { v ->
+                        draft = v.take(63)
+                        if (draft.isBlank() || SessionPrefs.validGuestHostname(draft) != null) onGuestHostname(draft)
+                    },
+                    singleLine = true, isError = !valid && draft.isNotBlank(),
+                    placeholder = { Text(SessionPrefs.DEFAULT_GUEST_HOSTNAME) },
+                    modifier = Modifier.width(220.dp),
+                )
+            }
         }
         if (phantomWarning != null) {
             Spacer(Modifier.height(16.dp))
