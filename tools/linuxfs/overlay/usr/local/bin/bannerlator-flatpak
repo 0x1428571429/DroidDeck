@@ -83,11 +83,22 @@ def transaction(inst):
     def on_operation_error(tr, op, err, details):
         # A runtime extension that fails to install (a missing translation, an unneeded GL
         # driver) is not worth losing the app over; anything else ends the transaction.
-        # FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL is 1; the bindings do not always name it.
+        # FLATPAK_TRANSACTION_ERROR_DETAILS_NON_FATAL is 1, but PyGObject does not always hand the
+        # flags over ("g_value_get_flags: assertion ... failed" and a 0). An extension installed
+        # alongside an app - its translations, debug data, a GL or codecs runtime - is what Flatpak
+        # marks non-fatal, as the flatpak CLI does: its failure costs that extension, not the app.
         try:
             non_fatal = bool(int(details) & 1)
         except (TypeError, ValueError):
             non_fatal = False
+        if not non_fatal:
+            try:
+                related = bool(op.get_related_to_ops())
+            except (AttributeError, TypeError):
+                related = False
+            ref_id = (op.get_ref() or "").split("/")[1:2]
+            ref_id = ref_id[0] if ref_id else ""
+            non_fatal = related or ref_id.endswith((".Locale", ".Debug")) or ".GL." in ref_id or "codecs" in ref_id
         emit(e="warning" if non_fatal else "error", message="%s: %s" % (op.get_ref(), err.message))
         if not non_fatal:
             state["error"] = err.message

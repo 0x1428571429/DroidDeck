@@ -46,6 +46,7 @@ object GuestCommand {
             "/usr/bin/env", "-i", "HOME=/root", "USER=root", "LANG=C.UTF-8",
             "PATH=/usr/local/bin:/usr/bin:/bin", "XDG_RUNTIME_DIR=${runtimeDir.path}",
             "XDG_DATA_HOME=/root/.local/share", "FLATPAK_BWRAP=${FlatpakManager.BWRAP}",
+            "XDG_DATA_DIRS=/root/.local/share/flatpak/exports/share:/usr/local/share:/usr/share",
         )
         cmd += argv
         val builder = ProcessBuilder(cmd).directory(root).redirectErrorStream(true)
