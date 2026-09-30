@@ -1,5 +1,10 @@
 # Flatpak and the Store
 
+Both features are beta and off by default. Setup → Launcher → "Linux apps (beta)" has one toggle for the
+Flathub Store, which shows the Store rail item and the Store's apps on the Desktop page, and one for
+AppImages, which shows the AppImages section. Turning either off hides it; installed apps stay installed
+and remain in the Linux desktop's menu.
+
 The Store rail section installs apps from Flathub into the Linux runtime with Flatpak. Only
 ARM64 builds are listed. Everything lives in one per-user installation at
 `/root/.local/share/flatpak`, so nothing needs Flatpak's system helper or polkit.

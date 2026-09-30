@@ -138,6 +138,8 @@ class MainActivity : ComponentActivity() {
     private var clientDirectAudio by mutableStateOf(false)
     private var forceFullscreen by mutableStateOf(true)
     private var launcherFullscreen by mutableStateOf(true)
+    private var storeEnabled by mutableStateOf(false)
+    private var appImagesEnabled by mutableStateOf(false)
     private var mic by mutableStateOf(false)
 
     // The app's own picker (files/), once per kind of pick: the two driver lists validate
@@ -269,6 +271,8 @@ class MainActivity : ComponentActivity() {
         theme = SessionPrefs.theme(this)
         backActionsInverted = SessionPrefs.backActionsInverted(this)
         launcherFullscreen = SessionPrefs.launcherFullscreen(this)
+        storeEnabled = SessionPrefs.storeEnabled(this)
+        appImagesEnabled = SessionPrefs.appImagesEnabled(this)
         applyLauncherFullscreen()
         setContent {
             DroidDeckTheme(theme) {
@@ -312,6 +316,8 @@ class MainActivity : ComponentActivity() {
                         phantomProcessStatus = phantomProcessStatus,
                         showPhantomGate = showPhantomGate,
                         launcherFullscreen = launcherFullscreen,
+                        storeEnabled = storeEnabled,
+                        appImagesEnabled = appImagesEnabled,
                     ),
                     FrontEndActions(
                         onPlay = { startSteamSession() },
@@ -402,6 +408,8 @@ class MainActivity : ComponentActivity() {
                             launcherFullscreen = on
                             applyLauncherFullscreen()
                         },
+                        onStoreEnabled = { on -> SessionPrefs.setStoreEnabled(this, on); storeEnabled = on },
+                        onAppImagesEnabled = { on -> SessionPrefs.setAppImagesEnabled(this, on); appImagesEnabled = on },
                         onHomeApp = { manageHomeApp() },
                         onHomeScreen = { on ->
                             HomeApp.setHomeScreenEnabled(this, on)
