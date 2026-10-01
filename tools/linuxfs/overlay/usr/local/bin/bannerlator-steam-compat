@@ -16,9 +16,12 @@
 # require_tool_appid. Proton takes its base directory from dirname(sys.argv[0]) without resolving
 # it, so it reads files/ through those symlinks and runs directly on this rootfs.
 import os
+import hashlib
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
 
 TOOL = "bannerlator-proton-arm64"
 # Valve's own ARM64 Proton, by the name the client registers it under. Used only to bootstrap a
@@ -138,6 +141,18 @@ bl_game_cpus() {
   # into spawning its own threads, and this way every thread inherits it from the first instruction.
   BL_TASKSET="taskset -c $BL_GAME_CPUS"
   echo "bannerlator-proton: game cores $BL_GAME_CPUS" >&2
+}
+"""
+
+# Prepare Steam's transient evaluator input before Wine reads it. Only the old x86 IExpress
+# redistributables are changed: their extracted MSI is run normally, without the stuck wrapper.
+BL_INSTALLSCRIPT_SETUP = """
+bl_installscript() {
+  [ "${verb:-}" = run ] || return 0
+  case "${1:-}" in */iscriptevaluator.exe)
+    /usr/local/bin/bannerlator-steam-compat --installscript "${STEAM_COMPAT_CLIENT_INSTALL_PATH:-}" "${2:-}"
+    ;;
+  esac
 }
 """
 
@@ -272,6 +287,7 @@ if [ -n "$depot" ]; then
   bl_game_cpus
   bl_idtech3 "$@"
   bl_libpath
+  bl_installscript "$@"
   exec ${BL_TASKSET:-} /usr/local/bin/bannerlator-game-env "$depot/proton" "$verb" "$@" "${BL_EXTRA_ARGS[@]}"
 fi
 echo "bannerlator-proton: no ARM64 Proton depot yet - the client downloads one as this tool's dependency; retry the launch once it has" >&2
@@ -282,7 +298,7 @@ exit 1
 # something else.
 LAUNCHER_SH = LAUNCHER_SH.replace(
     "verb=$1; shift", "verb=$1; shift\n" + BL_DIRECTAUDIO_SETUP + BL_GAME_CPUS_SETUP + BL_IDTECH3_SETUP
-    + BL_COMPONENTS_SETUP + BL_LIBPATH_SETUP, 1)
+    + BL_COMPONENTS_SETUP + BL_LIBPATH_SETUP + BL_INSTALLSCRIPT_SETUP, 1)
 
 # A third-party Proton dropped into compatibilitytools.d - GE-Proton, proton-cachyos, anything of
 # that shape - is adopted rather than used as shipped, for the same two reasons Valve's ARM64 depot
@@ -319,6 +335,7 @@ bl_directaudio "$here"
 bl_game_cpus
 bl_idtech3 "$@"
 bl_libpath
+bl_installscript "$@"
 # Proton takes its base directory from dirname(sys.argv[0]) without resolving it, so it has to be
 # started from its own tree.
 exec ${BL_TASKSET:-} /usr/local/bin/bannerlator-game-env "$here/%s" "$verb" "$@" "${BL_EXTRA_ARGS[@]}"
@@ -430,6 +447,159 @@ def write_changed(path, text, mode=None):
     return not same
 
 
+def vdf_value(token):
+    return re.sub(r'\\(["\\])', r'\1', token[1:-1])
+
+
+def vdf_quote(value):
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def direct_entries(tokens, start):
+    """Yield keys and their value/block indices, preserving repeated VDF keys."""
+    i = start + 1
+    while i < block_end(tokens, start):
+        yield vdf_value(tokens[i]).lower(), i + 1
+        i = block_end(tokens, i + 1) + 1 if tokens[i + 1] == '{' else i + 2
+
+
+def redist_msi(installer, cache_root):
+    """Extract a recognized old VC x86 MSI bundle with the runtime's libarchive tools.
+
+    Darksiders' VC2005 IExpress child exits its main thread under ARM64EC Wine, leaving another
+    thread waiting on a pipe. Steam waits forever for that child. Running its actual MSI directly
+    succeeds. Burn bundles and other installers keep their original launch path.
+    """
+    def members(path):
+        result = subprocess.run(['bsdtar', '-tf', path], check=True, capture_output=True,
+                                text=True, timeout=10)
+        return {name.lower(): name for name in result.stdout.splitlines()
+                if name and '/' not in name and '\\' not in name and name not in ('.', '..')}
+
+    def extract(source, names, destination):
+        subprocess.run(['bsdtar', '-xf', source, '-C', destination,
+                        '--no-same-owner', '--no-same-permissions', '--', *names],
+                       check=True, capture_output=True, timeout=10)
+        for name in names:
+            path = os.path.join(destination, name)
+            if os.path.islink(path) or not os.path.isfile(path):
+                raise ValueError('redistributable member is not a regular file')
+
+    # These pre-Burn bundles are small. Avoid interpreting an arbitrary large executable archive.
+    if os.path.getsize(installer) > 32 * 1024 * 1024:
+        return None
+    with open(installer, 'rb') as f:
+        hasher = hashlib.sha256()
+        for chunk in iter(lambda: f.read(65536), b''):
+            hasher.update(chunk)
+        digest = hasher.hexdigest()
+    target = os.path.join(cache_root, digest)
+    os.makedirs(cache_root, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=cache_root) as staging:
+        source = installer
+        entries = members(source)
+        # VC2005 has two IExpress layers. Extract only the recognized flat child, never the
+        # archive's full contents; libarchive's CAB support also handles these embedded cabinets.
+        inner = [name for key, name in entries.items()
+                 if re.fullmatch(r'vcredi[^/\\]*\.exe', key)]
+        if len(inner) == 1:
+            extract(source, inner, staging)
+            source = os.path.join(staging, inner[0])
+            entries = members(source)
+        for msi, cab in (('vcredist.msi', 'vcredis1.cab'), ('vc_red.msi', 'vc_red.cab')):
+            if msi in entries and cab in entries:
+                payload = os.path.join(staging, 'payload')
+                os.mkdir(payload)
+                names = [entries[msi], entries[cab]]
+                extract(source, names, payload)
+                with open(os.path.join(payload, names[0]), 'rb') as f:
+                    if f.read(8) != b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+                        raise ValueError('redistributable MSI has an invalid header')
+                with open(os.path.join(payload, names[1]), 'rb') as f:
+                    if f.read(4) != b'MSCF':
+                        raise ValueError('redistributable cabinet has an invalid header')
+                # Reuse only a complete pair. A failed extraction never becomes the cache entry.
+                if not all(os.path.isfile(os.path.join(target, n)) and
+                           not os.path.islink(os.path.join(target, n)) for n in names):
+                    if os.path.lexists(target):
+                        raise ValueError('incomplete redistributable cache')
+                    os.rename(payload, target)
+                return os.path.join(target, names[0])
+    return None
+
+
+def prepare_installscript(steam_root, script):
+    # The input is Steam's temporary evaluator file, not a game's installed metadata. Restrict
+    # resolution to that one directory so a Windows path or a traversal cannot rewrite other files.
+    parts = script.replace('\\', '/').split('/')
+    if len(parts) != 2 or parts[0].lower() != 'legacycompat' or not re.fullmatch(
+            r'evaluatorscript_[0-9]+\.vdf', parts[1], re.IGNORECASE):
+        return False
+    if not os.path.isabs(steam_root):
+        return False
+    path = os.path.join(steam_root, 'legacycompat', parts[1])
+    with open(path, encoding='utf-8') as f:
+        tokens = tokenize(f.read())
+    root = find_block(tokens, ['evaluatorscript'])
+    if root is None:
+        return False
+    changed = False
+    for _, entry in direct_entries(tokens, root):
+        if tokens[entry] != '{':
+            continue
+        values = dict(direct_entries(tokens, entry))
+        install_index = values.get('install_path')
+        compat = values.get('compat_installscript')
+        if install_index is None or compat is None or tokens[compat] != '{':
+            continue
+        install_dir = vdf_value(tokens[install_index])
+        run = dict(direct_entries(tokens, compat)).get('run process')
+        if run is None or tokens[run] != '{' or not os.path.isabs(install_dir):
+            continue
+        for _, process in direct_entries(tokens, run):
+            if tokens[process] != '{':
+                continue
+            fields = dict(direct_entries(tokens, process))
+            exe_index, args_index = fields.get('process 1'), fields.get('command 1')
+            if exe_index is None or args_index is None:
+                continue
+            match = re.fullmatch(r'%INSTALLDIR%[\\/]+(.+)',
+                                 vdf_value(tokens[exe_index]), re.IGNORECASE)
+            args = vdf_value(tokens[args_index]).split()
+            if not match or not args or any(arg.lower() not in
+                    ('/q:a', '/q', '/qn', '/quiet', '/norestart') for arg in args):
+                continue
+            relative = re.split(r'[\\/]+', match[1])
+            if any(part in ('', '.', '..') for part in relative) or not re.fullmatch(
+                    r'vcredist_x86[^\\/]*\.exe', relative[-1], re.IGNORECASE):
+                continue
+            try:
+                installer = install_dir
+                # Wine resolves filenames without case sensitivity, even on the private library.
+                for part in relative:
+                    if not os.path.exists(os.path.join(installer, part)):
+                        matches = [n for n in os.listdir(installer) if n.lower() == part.lower()]
+                        if len(matches) != 1:
+                            raise ValueError('ambiguous or missing redistributable path')
+                        part = matches[0]
+                    installer = os.path.join(installer, part)
+                msi = redist_msi(installer,
+                                  os.path.join(steam_root, 'legacycompat', '.droiddeck-redists'))
+            except (OSError, ValueError, subprocess.SubprocessError) as e:
+                print('bannerlator-steam-compat: redist preparation failed; original installer kept: %s' % e,
+                      file=sys.stderr)
+                continue
+            if msi is None:
+                continue
+            tokens[exe_index] = vdf_quote(r'C:\windows\syswow64\msiexec.exe')
+            tokens[args_index] = vdf_quote('/i "Z:%s" /qn /norestart' % msi.replace('/', '\\'))
+            changed = True
+            print('bannerlator-steam-compat: running extracted MSI for %s' % match[1], file=sys.stderr)
+    if changed:
+        write_changed(path, serialize(tokens))
+    return changed
+
+
 def first_key(path, section):
     """The single key naming a block inside `section`, or None. Used to keep a third-party tool's
     own internal name, so a mapping the user already made against it keeps working."""
@@ -503,7 +673,7 @@ def adopt_extras(tools):
             body = (EXTRA_WRAPPER_SH % entry_point).replace(
                     'here=$(dirname "$0")',
                     'here=$(dirname "$0")\n' + BL_DIRECTAUDIO_SETUP + BL_GAME_CPUS_SETUP + BL_IDTECH3_SETUP
-                    + BL_COMPONENTS_SETUP + BL_LIBPATH_SETUP, 1)
+                    + BL_COMPONENTS_SETUP + BL_LIBPATH_SETUP + BL_INSTALLSCRIPT_SETUP, 1)
             write_changed(wrapper, body, 0o755)
             write_changed(manifest, EXTRA_MANIFEST_VDF)
             write_changed(compat_vdf, EXTRA_COMPAT_TOOL_VDF % (name, entry))
@@ -638,4 +808,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) == 4 and sys.argv[1] == '--installscript':
+        try:
+            prepare_installscript(sys.argv[2], sys.argv[3])
+        except (OSError, ValueError, IndexError) as e:
+            print('bannerlator-steam-compat: original install script kept: %s' % e, file=sys.stderr)
+    else:
+        main()
