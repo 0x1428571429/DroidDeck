@@ -35,7 +35,7 @@ object SessionFiles {
             "usr/local/bin/bannerlator-steam-compat" to "usr/local/bin/bannerlator-steam-compat",
             "usr/local/bin/bannerlator-steam-install" to "usr/local/bin/bannerlator-steam-install",
             "usr/local/bin/bannerlator-steam-library" to "usr/local/bin/bannerlator-steam-library",
-            "usr/local/bin/bannerlator-seed-redists" to "usr/local/bin/bannerlator-seed-redists",
+            "usr/local/bin/bannerlator-restore-redists" to "usr/local/bin/bannerlator-restore-redists",
             "usr/local/bin/bannerlator-proton-extra" to "usr/local/bin/bannerlator-proton-extra",
             "usr/local/bin/bannerlator-netmanager" to "usr/local/bin/bannerlator-netmanager",
             "usr/local/bin/bannerlator-steam-launch" to "usr/local/bin/bannerlator-steam-launch",

@@ -1,0 +1,86 @@
+#!/usr/bin/python3
+"""Undo the old blanket HasRunKey seeder before Steam/Wine starts.
+
+Steam must run native prerequisites and record their real result. Only prefixes carrying
+our old seeder stamp are migrated. Proton's intentional .NET/XNA defaults remain intact.
+"""
+import os
+from pathlib import Path
+import re
+import sys
+import tempfile
+
+
+def restore_prefix(prefix):
+    prefix = Path(prefix)
+    stamp = prefix / '.bannerlator-redists'
+    reg = prefix / 'system.reg'
+    if not stamp.is_file() or stamp.is_symlink() or not reg.is_file() or reg.is_symlink():
+        return False
+    text = reg.read_text(encoding='utf-8')
+    if not text.startswith('WINE REGISTRY Version 2'):
+        raise ValueError('not a Wine registry')
+    out = []
+    clear = False
+    for line in text.splitlines(keepends=True):
+        match = re.match(r'^\[([^\]]+)\]', line)
+        if match:
+            key = match[1].replace('\\\\', '\\').lower()
+            parts = key.split('\\')
+            try:
+                common = parts.index('commonredist')
+            except ValueError:
+                clear = False
+            else:
+                clear = (parts[:common] in (
+                    ['software', 'valve', 'steam', 'apps'],
+                    ['software', 'wow6432node', 'valve', 'steam', 'apps'])
+                    and len(parts) > common + 1
+                    and parts[common + 1] not in ('.net', 'xna'))
+        if clear and re.fullmatch(r'"[^"\r\n]+"=dword:00000001\s*', line):
+            continue
+        out.append(line)
+    updated = ''.join(out)
+    if updated != text:
+        stat = reg.stat()
+        descriptor, temporary = tempfile.mkstemp(dir=prefix, prefix='.redists-')
+        try:
+            with os.fdopen(descriptor, 'w', encoding='utf-8') as f:
+                f.write(updated)
+            os.chmod(temporary, stat.st_mode & 0o777)
+            # Preserve template dates: this migration already covers existing prefixes and
+            # should not force every game through a Proton prefix upgrade.
+            os.utime(temporary, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            os.replace(temporary, reg)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    stamp.unlink()
+    return updated != text
+
+
+def restore(steam_root, libraries=('/mnt/droiddeck-sd',)):
+    roots = [Path(steam_root), *(Path(p) for p in libraries)]
+    prefixes = []
+    for root in roots:
+        prefixes.extend(root.glob('steamapps/compatdata/*/pfx'))
+        prefixes.extend(root.glob('steamapps/common/Proton*/files/share/default_pfx*'))
+    prefixes.extend(Path(steam_root).glob('compatibilitytools.d/*/files/share/default_pfx*'))
+    seen = set()
+    changed = 0
+    for prefix in prefixes:
+        actual = prefix.resolve()
+        if actual in seen:
+            continue
+        seen.add(actual)
+        try:
+            if restore_prefix(actual):
+                changed += 1
+                print('bannerlator-restore-redists: restored Steam prerequisite checks in %s' % prefix)
+        except (OSError, UnicodeError, ValueError) as error:
+            print('bannerlator-restore-redists: %s: %s' % (prefix, error), file=sys.stderr)
+    return changed
+
+
+if __name__ == '__main__':
+    restore(sys.argv[1])

@@ -323,9 +323,9 @@ case $mode in
       step "adding the app's own games to the client's library"
       bannerlator-steam-shortcuts "$steam_root" "$BL_ADDED_GAMES" || true
     fi
-    # Steam runs a game's shared redistributables inside its prefix on first launch; marking
-    # them as already run keeps those x86 installers from starting under emulation at all.
-    bannerlator-seed-redists "$steam_root" || true
+    # Undo earlier blanket success markers while Wine is stopped. Steam now installs its
+    # prerequisites normally; the Proton wrapper handles the old VC MSI bundles quietly.
+    bannerlator-restore-redists "$steam_root" || true
     # The compatibility tool runs Valve's arm64 Proton, which the client fetches like any depot.
     # Asked for on the command line the first time, so a Windows title has it before it is needed.
     if [ ! -f "$steam_root/steamapps/appmanifest_4427310.acf" ]; then
@@ -397,18 +397,6 @@ case $mode in
     # titles are installed: a title installed this session gets the client's own per-app Proton
     # choice, which it cannot start. Refresh the per-app entries every so often; the registrar is
     # idempotent, so a repeat costs nothing.
-    # The seeder has the same problem and a worse consequence. It marks the shared redistributables
-    # as already run in each prefix that exists, and a game's prefix is not created until the
-    # client launches it - so a title played for the first time this session was never covered, and
-    # its install scripts run for real. That is exactly the hang the seeder exists to prevent: Need
-    # for Speed Payback sat on "Running install script" with vcredist_x86.exe blocked in pipe_read,
-    # holding both ends of a pipe nobody would write to, while the client waited for it to exit.
-    # Seeding again on the same beat covers a prefix the moment it appears.
-    # The seeder runs on a shorter beat than the registrar because it is racing something. The
-    # client creates a prefix when it launches a title and runs that title's install scripts
-    # moments later, so the seeder has only that gap to mark the redistributables as already run.
-    # It stamps each prefix it has covered and skips it thereafter, so the extra passes cost
-    # almost nothing.
     # The drawer's "Stretch games to fill the screen" works live: the app writes its choice to
     # ~/.droiddeck-fill, and each change goes to gamescope as GAMESCOPE_FORCE_WINDOWS_FULLSCREEN on
     # the root window, which it watches. What gamescope was started with is where this begins.
@@ -478,13 +466,8 @@ case $mode in
         esac
       done
     ) &
-    # The library beat. Both helpers are whole programs under proot (the compat one a python
-    # start and a parse of the client's config), and nearly every beat has nothing new for them.
-    # The seeder marks Proton's prefix template as well as the prefixes, so a new prefix is born
-    # marked and every 15 s is soon enough for the rest. The compat pass runs when a directory it
-    # reads from has changed since its last run - a new manifest, a new depot or tool, the client
-    # rewriting config.vdf - which [ -nt ] answers without starting anything, and once a minute
-    # regardless.
+    # Refresh compatibility registrations when a library or client config changes, and once
+    # a minute regardless. Prerequisite checks belong to Steam and are not changed on this beat.
     (
       beat=0
       compat_stamp=$HOME/.bl-compat-beat
@@ -502,7 +485,6 @@ case $mode in
         nap 5
         beat=$((beat + 1))
         [ "$((beat % 3))" -eq 0 ] || continue
-        bannerlator-seed-redists "$steam_root" >/dev/null 2>&1 || true
         if compat_due; then
           : > "$compat_stamp"
           bannerlator-steam-compat "$steam_root" >/dev/null 2>&1 || true
