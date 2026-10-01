@@ -141,7 +141,6 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:noHistory="true"
-            android:taskAffinity="${applicationId}.update"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- Hands a zipped session folder to the share sheet; nothing else is exposed. -->
         <provider
