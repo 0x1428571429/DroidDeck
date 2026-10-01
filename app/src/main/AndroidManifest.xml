@@ -135,13 +135,6 @@
         <service
             android:name=".core.WirelessAdbPairingService"
             android:exported="false" />
-        <!-- Takes PackageInstaller's answer to an in-app update and opens the new build. -->
-        <activity
-            android:name=".update.InstallStatusActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <!-- Hands a zipped session folder to the share sheet; nothing else is exposed. -->
         <provider
             android:name="androidx.core.content.FileProvider"

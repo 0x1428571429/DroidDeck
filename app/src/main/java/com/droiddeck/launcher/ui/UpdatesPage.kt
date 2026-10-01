@@ -112,10 +112,15 @@ internal fun UpdatesPage(s: FrontEndState, a: FrontEndActions, modifier: Modifie
             if (LocalNarrowPane.current) {
                 StatusPanel(s, u, ua, me)
                 Box(Modifier.height(18.dp))
+                ChannelLabel()
                 ChannelPicker(u, ua)
-            } else Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                Box(Modifier.weight(1f)) { ChannelPicker(u, ua) }
-                Box(Modifier.weight(1.15f)) { StatusPanel(s, u, ua, me) }
+            } else {
+                // The label sits over both columns, so the status card lines up with the first channel.
+                ChannelLabel()
+                Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                    Box(Modifier.weight(1f)) { ChannelPicker(u, ua) }
+                    Box(Modifier.weight(1.15f)) { StatusPanel(s, u, ua, me) }
+                }
             }
         }
     }
@@ -236,12 +241,19 @@ private fun megabytes(bytes: Long) = "${(bytes + 524_288) / 1_048_576} MB"
 
 /** The three channels as cards to pick from; Test builds opens its list of PRs under it. */
 @Composable
+private fun ChannelLabel() {
+    Text(
+        "UPDATE CHANNEL", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 2.dp, top = 2.dp, bottom = 10.dp),
+    )
+}
+
+@Composable
 private fun ChannelPicker(u: UpdatesState, ua: UpdatesActions) {
     val colors = MaterialTheme.colorScheme
     val catalog = u.catalog
     val tests = catalog?.tests.orEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("UPDATE CHANNEL", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.5.sp, color = colors.onSurfaceVariant, modifier = Modifier.padding(start = 2.dp, top = 2.dp))
         ChannelCard(
             Icons.Outlined.Verified, "Stable", "Tested releases, for most people",
             catalog?.stable?.let { "${it.version ?: it.tag} · ${ago(it.publishedAt)}" }, u.follow.channel == Channel.STABLE,
