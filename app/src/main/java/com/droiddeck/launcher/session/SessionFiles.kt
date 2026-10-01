@@ -53,6 +53,7 @@ object SessionFiles {
             "usr/local/bin/droiddeck-steam-shortcuts" to "usr/local/bin/droiddeck-steam-shortcuts",
             "usr/local/bin/droiddeck-steam-games" to "usr/local/bin/droiddeck-steam-games",
             "usr/local/bin/droiddeck-pad-defaults" to "usr/local/bin/droiddeck-pad-defaults",
+            "usr/local/bin/droiddeck-gog" to "usr/local/bin/droiddeck-gog",
             // Flatpak: the bwrap stand-in, the store's helper and setup, and the front end's launcher.
             "usr/local/bin/droiddeck-bwrap" to "usr/local/bin/droiddeck-bwrap",
             "usr/local/bin/droiddeck-flatpak" to "usr/local/bin/droiddeck-flatpak",

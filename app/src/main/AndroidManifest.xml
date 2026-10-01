@@ -148,6 +148,10 @@
         <service
             android:name=".runtime.RuntimeInstallService"
             android:exported="false" />
+        <!-- Holds the process in the foreground while a GOG game downloads. -->
+        <service
+            android:name=".store.gog.GogInstallService"
+            android:exported="false" />
         <service
             android:name=".core.WirelessAdbPairingService"
             android:exported="false" />

@@ -348,6 +348,7 @@ jobs:
           done
           test -f "$D/usr/local/bin/droiddeck-session"
           test -f "$D/usr/local/bin/droiddeck-proton-extra"
+          test -f "$D/usr/local/bin/droiddeck-gog"
 
       - name: Cache the CMake build tree
         uses: actions/cache@v4

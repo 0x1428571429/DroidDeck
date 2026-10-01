@@ -19,10 +19,12 @@ object GuestCommand {
      * for the package tools, which refuse any uid but 0. With [logName], everything the command
      * says also goes to Download/DroidDeck/tools/<logName>.log beside the session logs, so a problem can
      * be handed over like a session's. With [linkDir], hard links (which Android denies apps)
-     * become symlinks to files proot keeps there (its link2symlink).
+     * become symlinks to files proot keeps there (its link2symlink). [extraBinds] adds library
+     * mounts, and [onProcess] lets a caller stop its command.
      */
     fun run(context: Context, argv: List<String>, fakeRoot: Boolean = false, logName: String? = null,
-            linkDir: File? = null, onLine: (String) -> Unit): Int {
+            linkDir: File? = null, extraBinds: List<String> = emptyList(),
+            onProcess: ((Process) -> Unit)? = null, onLine: (String) -> Unit): Int {
         val log = logName?.let {
             try {
                 File(File(LinuxRuntime.debugLogDir(), SessionPaths.TOOLS_DIR).apply { mkdirs() }, "$it.log").printWriter()
@@ -30,13 +32,14 @@ object GuestCommand {
         }
         log?.println("== ${java.util.Date()} ${argv.joinToString(" ")}")
         try {
-            return runLogged(context, argv, fakeRoot, linkDir) { line -> log?.println(line); log?.flush(); onLine(line) }
+            return runLogged(context, argv, fakeRoot, linkDir, extraBinds, onProcess) { line -> log?.println(line); log?.flush(); onLine(line) }
         } finally {
             log?.close()
         }
     }
 
-    private fun runLogged(context: Context, argv: List<String>, fakeRoot: Boolean, linkDir: File?, onLine: (String) -> Unit): Int {
+    private fun runLogged(context: Context, argv: List<String>, fakeRoot: Boolean, linkDir: File?, extraBinds: List<String>,
+                          onProcess: ((Process) -> Unit)?, onLine: (String) -> Unit): Int {
         val root = LinuxRuntime.rootDir(context)
         LinuxRuntime.writeAccounts(context)
         SessionFiles.stage(context, root)
@@ -47,6 +50,7 @@ object GuestCommand {
         if (linkDir != null) cmd.add(1, "--link2symlink")
         LinuxRuntime.binds(context, null, runtimeDir, Environment.getExternalStorageDirectory(), null)
             .forEach { cmd.add("-b"); cmd.add(it) }
+        extraBinds.forEach { cmd.add("-b"); cmd.add(it) }
         cmd += listOf(
             "/usr/bin/env", "-i", "HOME=/root", "USER=root", "LANG=C.UTF-8",
             "PATH=/usr/local/bin:/usr/bin:/bin", "XDG_RUNTIME_DIR=${LinuxRuntime.GUEST_RUNTIME_DIR}",
@@ -65,6 +69,7 @@ object GuestCommand {
         val process = builder.start()
         val pid = HostProcess.pidOf(process)
         OrphanReaper.keep(pid)
+        onProcess?.invoke(process)
         try {
             process.inputStream.bufferedReader().useLines { lines -> lines.forEach(onLine) }
             return process.waitFor()

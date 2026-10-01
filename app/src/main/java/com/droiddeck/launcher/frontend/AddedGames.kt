@@ -6,6 +6,8 @@ import com.droiddeck.launcher.runtime.LinuxRuntime
 import org.json.JSONObject
 import com.droiddeck.launcher.session.GameStorage
 import com.droiddeck.launcher.session.SessionPrefs
+import com.droiddeck.launcher.store.gog.GogGameInfo
+import com.droiddeck.launcher.store.gog.GogManager
 import java.io.File
 import java.util.zip.CRC32
 
@@ -23,6 +25,10 @@ object AddedGames {
         val gameId: Long,
         val candidates: List<File>,
         val steamAppId: Int? = null,
+        /** Launch arguments the game's store gives (a GOG play task's); empty for most games. */
+        val args: String = "",
+        /** The store a game was installed from ("gog"), or null for a folder the user added. */
+        val store: String? = null,
     ) {
         fun folderName(): String = folder.name
     }
@@ -69,6 +75,9 @@ object AddedGames {
         GameStorage.effective(context)?.let { lib ->
             if (path.startsWith("${lib.path}/")) return "$LIBRARY/" + path.removePrefix("${lib.path}/")
         }
+        // The runtime's own disk (the store's internal GOG folder) is the session's root.
+        val rootfs = LinuxRuntime.rootDir(context).absolutePath
+        if (path.startsWith("$rootfs/")) return "/" + path.removePrefix("$rootfs/")
         return null
     }
 
@@ -90,15 +99,17 @@ object AddedGames {
 
     fun scan(context: Context): List<Game> {
         val out = ArrayList<Game>()
+        val stores = GogManager.bases(context).map { it.host }
         val folders = roots(context).map { it.host } + listOfNotNull(
             GameStorage.effective(context)?.let { File(it.path) },
             GameStorage.effective(context)?.let { File(it.path, "steamapps/common") },
-        )
+        ) + stores.filter { it.isDirectory }
+        val storePaths = stores.map { it.absolutePath }.toSet()
         for (dir in folders.distinctBy { it.absolutePath }) {
             if (!dir.isDirectory) { Log.w(TAG, "$dir is not a folder; skipped"); continue }
             val steamInstalls = steamInstallDirs(dir)
             for (folder in dir.listFiles { f -> f.isDirectory }?.sortedBy { it.name.lowercase() } ?: emptyList()) {
-                if (folder.name.lowercase() in steamInstalls) continue
+                if (folder.name.lowercase() in steamInstalls || folder.absolutePath in storePaths) continue
                 scanGame(context, folder, out)
             }
         }
@@ -125,12 +136,19 @@ object AddedGames {
 
     private fun scanGame(context: Context, folder: File, out: MutableList<Game>) {
         run {
+            // A store download still running (or stopped partway) is not a game yet.
+            if (GogManager.incomplete(folder)) return
+            // A game the store installed says which exe it is, where it starts and with what
+            // arguments. Folders the user added keep the guess: changing their exe would change
+            // their shortcut id, and with it the prefix their saves are in.
+            val task = if (File(folder, GogManager.MARKER).isFile) GogGameInfo.read(folder)?.task else null
             val candidates = candidates(folder)
             val chosen = SessionPrefs.addedGameExe(context, folder.path).takeIf { it.isNotEmpty() }?.let { File(it) }?.takeIf { it.isFile }
-            val exe = chosen ?: candidates.firstOrNull() ?: return
+            val exe = chosen ?: task?.exe ?: candidates.firstOrNull() ?: return
             val guestExe = guestPath(context, exe)
             if (guestExe == null) { Log.w(TAG, "${folder.name}: the session cannot see ${exe.path}"); return }
-            val guestDir = guestPath(context, exe.parentFile ?: folder) ?: return
+            val startDir = if (chosen == null && task != null) task.workingDir else exe.parentFile ?: folder
+            val guestDir = guestPath(context, startDir) ?: return
             val name = folder.name
             // Keyed by the pre-rename path so shortcut ids, and the prefixes and saves under them, stay put.
             val crc = CRC32().apply { update(("\"${guestExe.replaceFirst(Regex("^$LIBRARY/"), "$LEGACY_LIBRARY/")}\"" + name).toByteArray()) }.value
@@ -138,7 +156,8 @@ object AddedGames {
             val steamRoot = File(LinuxRuntime.rootDir(context), "root/.local/share/Steam")
             val steamId = steamRoute(steamRoot, appId)
             out.add(Game(folder, name, exe, guestExe, guestDir, appId,
-                steamId?.toLong() ?: ((appId shl 32) or 0x02000000L), candidates, steamId))
+                steamId?.toLong() ?: ((appId shl 32) or 0x02000000L), candidates, steamId,
+                args = if (chosen == null) task?.arguments.orEmpty() else "", store = if (task != null) "gog" else null))
         }
     }
 
@@ -161,6 +180,8 @@ object AddedGames {
             json.append("{\"name\":").append(quote(g.name)).append(",\"exe\":").append(quote(g.guestExe))
                 .append(",\"folder\":").append(quote(guestPath(context, g.folder) ?: g.guestDir))
                 .append(",\"dir\":").append(quote(g.guestDir)).append(",\"appid\":").append(g.appId)
+            if (g.args.isNotEmpty()) json.append(",\"args\":").append(quote(g.args))
+            g.store?.let { json.append(",\"store\":").append(quote(it)) }
             // The art, as the session sees it: the app's cache is bound at its own path, a file in
             // the game's folder at the folder's guest path.
             val art = AddedGameArt.resolve(context, g)
