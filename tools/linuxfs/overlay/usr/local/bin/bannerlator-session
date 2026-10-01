@@ -313,6 +313,82 @@ case $mode in
       ) &
     fi
 
+    if [ "${BL_ZRAM:-0}" = 1 ]; then
+      printf 0 > /tmp/.bl-zram
+      : > /tmp/.bl-zram.log
+      step "zRAM compression: on"
+      (
+        bl_zram_each() {
+          local _d _c
+          for _d in /proc/[0-9]*; do
+            IFS= read -r -d '' _c < "$_d/cmdline" 2>/dev/null || continue
+            case ${_c##*/} in steam|steamwebhelper) ;; *) continue ;; esac
+            "$1" "${_d#/proc/}"
+          done
+        }
+        bl_zram_add() {
+          local _k _v _u
+          while read -r _k _v _u; do
+            case $_k in
+              VmRSS:) _bl_rss=$((_bl_rss + _v)) ;;
+              VmSwap:) _bl_swap=$((_bl_swap + _v)) ;;
+            esac
+          done < "/proc/$1/status" 2>/dev/null
+          _bl_procs=$((_bl_procs + 1))
+        }
+        bl_zram_measure() {
+          _bl_rss=0 _bl_swap=0 _bl_procs=0
+          bl_zram_each bl_zram_add
+          echo "procs=$_bl_procs rss_kb=$_bl_rss swap_kb=$_bl_swap"
+        }
+        bl_zram_note() {
+          step "zRAM: $1"
+          echo "$(date -u +%H:%M:%S) watcher $1" >> /tmp/.bl-zram.log
+        }
+        bl_zram_kick() { kill -URG "$1" 2>/dev/null || :; }
+        bl_zram_game() {
+          local _d _c
+          for _d in /proc/[0-9]*; do
+            IFS= read -r -d '' _c < "$_d/cmdline" 2>/dev/null || continue
+            [ "${_c##*/}" = reaper ] && return 0
+          done
+          return 1
+        }
+        bl_zram_apply() {
+          printf '%s' "$1" > /tmp/.bl-zram
+          bl_zram_each bl_zram_kick
+        }
+        _bl_seen=0 _bl_packed=0 _bl_at=0
+        while kill -0 $$ 2>/dev/null; do
+          _bl_now=$SECONDS
+          if bl_zram_game; then
+            [ "$_bl_seen" = 1 ] || { _bl_seen=1; _bl_at=$_bl_now; }
+            if [ "$_bl_packed" = 0 ] && [ $((_bl_now - _bl_at)) -ge 20 ]; then
+              bl_zram_note "game running, compressing Steam $(bl_zram_measure)"
+              bl_zram_apply 1
+              nap 5
+              bl_zram_note "compressed $(bl_zram_measure)"
+              _bl_packed=1 _bl_at=$_bl_now
+            elif [ "$_bl_packed" = 1 ] && [ $((_bl_now - _bl_at)) -ge 300 ]; then
+              bl_zram_apply 1
+              _bl_at=$_bl_now
+            fi
+          elif [ "$_bl_seen" = 1 ]; then
+            _bl_seen=0
+            if [ "$_bl_packed" = 1 ]; then
+              bl_zram_note "game closed, restoring Steam $(bl_zram_measure)"
+              bl_zram_apply 0
+              nap 3
+              bl_zram_note "restored $(bl_zram_measure)"
+              _bl_packed=0
+            fi
+          fi
+          nap 3
+        done
+      ) &
+    else
+      rm -f /tmp/.bl-zram /tmp/.bl-zram.log
+    fi
     step "registering the app's game library with Steam"
     bannerlator-steam-library "$steam_root" || true
     step "setting up the ARM64 Proton compatibility tool"

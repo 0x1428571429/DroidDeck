@@ -41,6 +41,8 @@ fun PerformancePage(
     gpuClockPin: Boolean,
     prootNoSeccomp: Boolean,
     prootFastPath: Boolean,
+    zramCompression: Boolean,
+    zramSwapMb: Long?,
     guestHostname: String,
     phantomWarning: String?,
     onClientOverride: (Boolean) -> Unit,
@@ -53,6 +55,7 @@ fun PerformancePage(
     onGpuClockPin: (Boolean) -> Unit,
     onProotNoSeccomp: (Boolean) -> Unit,
     onProotFastPath: (Boolean) -> Unit,
+    onZramCompression: (Boolean) -> Unit,
     onGuestHostname: (String) -> Unit,
     onClientCore: (Int, Boolean) -> Unit,
     onGameCore: (Int, Boolean) -> Unit,
@@ -134,6 +137,15 @@ fun PerformancePage(
                 if (prootNoSeccomp) "Needs proot's seccomp filter: off while proot runs without seccomp."
                 else "Answers file lookups inside each program instead of through proot. Faster loading and less stutter; turn off if a program cannot find its files.",
                 prootFastPath && !prootNoSeccomp, enabled = !prootNoSeccomp, onChange = onProotFastPath,
+            )
+            ToggleRow(
+                host, "zram", "zRAM compression",
+                when {
+                    zramSwapMb == null -> "Checking this device for compressed memory."
+                    zramSwapMb <= 0L -> "This device has no compressed swap, so there is nothing to compress into."
+                    else -> "While a game runs, Steam's idle memory is compressed ahead of time into this device's $zramSwapMb MB zRAM and brought back when the game closes. Helps most when a game runs short of memory."
+                },
+                zramCompression && (zramSwapMb ?: 0L) > 0L, enabled = (zramSwapMb ?: 0L) > 0L, onChange = onZramCompression,
             )
         }
         SettingsGroup("Session identity") {

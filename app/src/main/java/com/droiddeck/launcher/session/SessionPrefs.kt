@@ -306,6 +306,12 @@ object SessionPrefs {
         prefs(context).edit().putBoolean("prootFastPath", on).apply()
     }
 
+    fun zramCompression(context: Context): Boolean = prefs(context).getBoolean("zramCompression", false)
+
+    fun setZramCompression(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("zramCompression", on).apply()
+    }
+
     const val DEFAULT_GUEST_HOSTNAME = "DroidDeck"
 
     @JvmStatic
