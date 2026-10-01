@@ -18,10 +18,10 @@ import java.net.URL
 /**
  * Installs one of DroidDeck's own builds over itself: download into the cache, check the file
  * against GitHub's sha256, then hand it to PackageInstaller. Android shows its own "Update this
- * app?" prompt, and the app is restarted on the new build.
+ * app?" prompt, and [InstallStatusActivity] opens the new build once it is in.
  */
 object SelfInstaller {
-    /** The broadcast PackageInstaller answers on; the launcher registers for it while it is open. */
+    /** The broadcast [InstallStatusActivity] passes PackageInstaller's answers on as; the launcher registers for it while it is open. */
     const val ACTION_STATUS = "com.droiddeck.launcher.update.INSTALL_STATUS"
 
     /** Android lets an app install packages only once the user allows it in "Install unknown apps". */
@@ -72,7 +72,7 @@ object SelfInstaller {
         }
     }
 
-    /** Writes [apk] into an install session and commits it; the answer comes as an [ACTION_STATUS] broadcast. */
+    /** Writes [apk] into an install session and commits it; the answer comes to [InstallStatusActivity]. */
     fun install(context: Context, apk: File) {
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
@@ -89,9 +89,9 @@ object SelfInstaller {
                     session.fsync(out)
                 }
             }
-            val status = Intent(ACTION_STATUS).setPackage(context.packageName)
+            val status = Intent(context, InstallStatusActivity::class.java)
             val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-            session.commit(PendingIntent.getBroadcast(context, id, status, flags).intentSender)
+            session.commit(PendingIntent.getActivity(context, id, status, flags).intentSender)
         }
     }
 
