@@ -666,14 +666,35 @@ __attribute__((visibility("hidden"))) static bool presents_steam_virtual() {
   return known == 1;
 }
 
+// Every process but the Steam client's own, which reads the pad as it always has.
+__attribute__((visibility("hidden"))) static bool is_steam_client() {
+  static int known;
+  if (known == 0) {
+    char exe[PATH_MAX];
+    ssize_t length = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    bool client = false;
+    if (length > 0) {
+      exe[length] = '\0';
+      const char *name = strrchr(exe, '/');
+      client = !strncmp(name ? name + 1 : exe, "steam", 5);
+    }
+    known = client ? 1 : -1;
+  }
+  return known == 1;
+}
+
 // The virtual gamepad is an X-Box 360 pad, whose triggers are ABS_Z and ABS_RZ. Wine places a
 // gamepad's axes by their position among the ones it advertises, so the triggers have to sit
 // where that pad has them: as ABS_GAS and ABS_BRAKE they follow the sticks, the right stick
 // lands on the left trigger, and a released right trigger reads as the right stick held up.
-// A pad made through /dev/uinput is that pad for real, whoever reads it.
+// A pad made through /dev/uinput is that pad for real, whoever reads it. So is the app's pad
+// wearing the Xbox 360 identity, to anything but the client: GLFW and SDL map 045E:028E by axis
+// position, so a native game or emulator otherwise had the right stick on RY and the right
+// trigger, and holding RT turned the camera down (Minecraft with Controlify, on the desktop).
 __attribute__((visibility("hidden"))) static bool
 presents_xbox_triggers(const FakeController &fake) {
-  return fake.uinput || presents_steam_virtual();
+  return fake.uinput || presents_steam_virtual() ||
+         (fake_xbox360_identity() && !is_steam_client());
 }
 
 __attribute__((visibility("hidden"))) static uint16_t
