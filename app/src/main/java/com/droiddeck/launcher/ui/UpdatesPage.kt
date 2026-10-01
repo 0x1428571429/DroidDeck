@@ -140,13 +140,13 @@ private fun StatusPanel(s: FrontEndState, u: UpdatesState, ua: UpdatesActions, m
     val pal = LocalPalette.current
     val catalog = u.catalog
     val release = catalog?.let { AppUpdates.release(it, u.follow) }
-    val offer = if (me.ci) catalog?.let { AppUpdates.offer(it, u.follow, me) } else null
+    val offer = if (me.updatable) catalog?.let { AppUpdates.offer(it, u.follow, me) } else null
     val name = channelName(u.follow)
     val offered = release != null && (offer == Offer.UPDATE || offer == Offer.SWITCH)
     class Look(val tint: Color, val status: String, val headline: String, val detail: String?)
     val look = when {
-        !me.ci -> Look(colors.onSurfaceVariant, "Local build", "Built on a computer",
-            "It's signed differently from the builds here, so Android won't update it in place. Uninstall it to switch.")
+        !me.updatable -> Look(colors.onSurfaceVariant, "Signed differently", "Can't update in place",
+            "This copy isn't signed with DroidDeck's release key, so Android won't install the builds here over it. Uninstall it to switch.")
         catalog == null -> Look(colors.onSurfaceVariant, if (u.checking) "Checking…" else "Not checked yet", "Updates", null)
         offer == Offer.UPDATE -> Look(AttentionAmber, "Update available", newBuild(u.follow, release!!), null)
         offer == Offer.SWITCH -> Look(pal.signal, "Ready to switch", newBuild(u.follow, release!!), null)
