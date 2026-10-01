@@ -144,8 +144,8 @@ bl_game_cpus() {
 }
 """
 
-# Prepare Steam's transient evaluator input before Wine reads it. Only the old x86 IExpress
-# redistributables are changed: their extracted MSI is run normally, without the stuck wrapper.
+# Prepare Steam's transient evaluator input before Wine reads it. Recognized legacy VC bundles
+# use their actual MSI; a verified legacy PhysX bundle uses its supported quiet argument.
 BL_INSTALLSCRIPT_SETUP = """
 bl_installscript() {
   [ "${verb:-}" = run ] || return 0
@@ -528,6 +528,22 @@ def redist_msi(installer, cache_root):
     return None
 
 
+# Mirror's Edge bundles Wise's PhysX 8.10.17 bootstrapper without arguments. /s is forwarded to
+# msiexec and still opens its license wizard; /qn installs the actual runtime silently. Match the
+# exact tested bundle, rather than guessing switches for other PhysX installer generations.
+QUIET_PHYSX_SHA256 = '32d27a5e64e099adc4d3d2c87e5702f237c3d1292406f166059837c4c827e22f'
+
+
+def quiet_physx(installer):
+    if os.path.getsize(installer) > 64 * 1024 * 1024 or not os.path.isfile(installer):
+        return False
+    digest = hashlib.sha256()
+    with open(installer, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b''):
+            digest.update(chunk)
+    return digest.hexdigest() == QUIET_PHYSX_SHA256
+
+
 def prepare_installscript(steam_root, script):
     # The input is Steam's temporary evaluator file, not a game's installed metadata. Restrict
     # resolution to that one directory so a Windows path or a traversal cannot rewrite other files.
@@ -561,17 +577,18 @@ def prepare_installscript(steam_root, script):
                 continue
             fields = dict(direct_entries(tokens, process))
             exe_index, args_index = fields.get('process 1'), fields.get('command 1')
-            if exe_index is None or args_index is None:
+            if exe_index is None:
                 continue
             match = re.fullmatch(r'%INSTALLDIR%[\\/]+(.+)',
                                  vdf_value(tokens[exe_index]), re.IGNORECASE)
-            args = vdf_value(tokens[args_index]).split()
-            if not match or not args or any(arg.lower() not in
-                    ('/q:a', '/q', '/qn', '/quiet', '/norestart') for arg in args):
+            args = vdf_value(tokens[args_index]).split() if args_index is not None else []
+            if not match:
                 continue
             relative = re.split(r'[\\/]+', match[1])
-            if any(part in ('', '.', '..') for part in relative) or not re.fullmatch(
-                    r'vcredist_x86[^\\/]*\.exe', relative[-1], re.IGNORECASE):
+            physx = relative[-1].lower() == 'physx_systemsoftware.exe' and not args
+            vc = re.fullmatch(r'vcredist_x86[^\\/]*\.exe', relative[-1], re.IGNORECASE)
+            if any(part in ('', '.', '..') for part in relative) or not (physx or (vc and args and
+                    all(arg.lower() in ('/q:a', '/q', '/qn', '/quiet', '/norestart') for arg in args))):
                 continue
             try:
                 installer = install_dir
@@ -583,6 +600,18 @@ def prepare_installscript(steam_root, script):
                             raise ValueError('ambiguous or missing redistributable path')
                         part = matches[0]
                     installer = os.path.join(installer, part)
+                if physx:
+                    if not quiet_physx(installer):
+                        continue
+                    if args_index is None:
+                        end = block_end(tokens, process)
+                        tokens[end:end] = [vdf_quote('command 1'), vdf_quote('/qn')]
+                    else:
+                        tokens[args_index] = vdf_quote('/qn')
+                    changed = True
+                    print('bannerlator-steam-compat: running verified PhysX 8.10.17 quietly',
+                          file=sys.stderr)
+                    continue
                 msi = redist_msi(installer,
                                   os.path.join(steam_root, 'legacycompat', '.droiddeck-redists'))
             except (OSError, ValueError, subprocess.SubprocessError) as e:

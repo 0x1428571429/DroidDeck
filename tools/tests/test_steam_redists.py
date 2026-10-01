@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import runpy
 import tempfile
 import unittest
@@ -113,6 +114,68 @@ class SteamRedistTest(unittest.TestCase):
             result = COMPAT['redist_msi'](str(installer), str(cache))
         self.assertTrue(Path(result).is_file())
         self.assertFalse((Path(self.tmp.name) / 'outside').exists())
+
+    def physx_fixture(self, command=None):
+        payload = b'verified Wise PhysX bundle fixture'
+        directory = self.installer_dir / 'PhysX'
+        directory.mkdir(exist_ok=True)
+        installer = directory / 'PhysX_SystemSoftware.exe'
+        installer.write_bytes(payload)
+        script = '''"evaluatorscript" { "0" {
+          "install_path" "%s" "compat_installscript" { "run process" {
+            "PhysX Version" {
+              "process 1" "%%INSTALLDIR%%\\\\physx\\\\PHYSX_SYSTEMSOFTWARE.EXE"
+              %s
+              "HasRunKey" "HKEY_LOCAL_MACHINE\\\\SOFTWARE\\\\AGEIA Technologies"
+              "MinimumHasRunValue" "81017" "NoCleanUp" "1"
+            }
+            "Other step" { "process 1" "%%INSTALLDIR%%\\\\other.exe" }
+          } }
+        } }''' % (self.installer_dir, '' if command is None else
+                  '"command 1" "%s"' % command)
+        self.path.write_text(script)
+        return installer, hashlib.sha256(payload).hexdigest()
+
+    def test_verified_physx_runs_quietly_and_preserves_steam_completion_checks(self):
+        for command in (None, ''):
+            installer, digest = self.physx_fixture(command)
+            with patch.dict(PREPARE.__globals__, QUIET_PHYSX_SHA256=digest):
+                self.assertTrue(self.prepare())
+                tokens = COMPAT['tokenize'](self.path.read_text())
+                decoded = [COMPAT['vdf_value'](t) for t in tokens if t.startswith('"')]
+                self.assertIn('/qn', decoded)
+                self.assertIn(r'%INSTALLDIR%\physx\PHYSX_SYSTEMSOFTWARE.EXE', decoded)
+                self.assertIn('81017', decoded)
+                self.assertIn(r'HKEY_LOCAL_MACHINE\SOFTWARE\AGEIA Technologies', decoded)
+                self.assertIn('Other step', decoded)
+                before = self.path.read_bytes()
+                self.assertFalse(self.prepare())
+                self.assertEqual(before, self.path.read_bytes())
+
+    def test_physx_other_versions_and_existing_commands_are_untouched(self):
+        installer, digest = self.physx_fixture()
+        before = self.path.read_bytes()
+        self.assertFalse(self.prepare())  # Fixture is not the real bundle's hash.
+        self.assertEqual(before, self.path.read_bytes())
+        for command in ('/uninstall', '/custom', '/s', '/qn'):
+            self.physx_fixture(command)
+            before = self.path.read_bytes()
+            with patch.dict(PREPARE.__globals__, QUIET_PHYSX_SHA256=digest):
+                self.assertFalse(self.prepare())
+            self.assertEqual(before, self.path.read_bytes())
+
+    def test_physx_missing_or_traversing_installer_keeps_original(self):
+        installer, digest = self.physx_fixture()
+        installer.unlink()
+        before = self.path.read_bytes()
+        self.assertFalse(self.prepare())
+        self.assertEqual(before, self.path.read_bytes())
+        self.physx_fixture()
+        self.path.write_text(self.path.read_text().replace('physx\\\\', '..\\\\'))
+        before = self.path.read_bytes()
+        with patch.dict(PREPARE.__globals__, QUIET_PHYSX_SHA256=digest):
+            self.assertFalse(self.prepare())
+        self.assertEqual(before, self.path.read_bytes())
 
 
 if __name__ == '__main__':
