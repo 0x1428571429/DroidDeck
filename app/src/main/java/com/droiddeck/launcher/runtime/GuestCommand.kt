@@ -18,9 +18,12 @@ object GuestCommand {
      * Runs [argv] and hands each output line to [onLine]; returns the exit status. [fakeRoot] is
      * for the package tools, which refuse any uid but 0. With [logName], everything the command
      * says also goes to Download/DroidDeck/tools/<logName>.log beside the session logs, so a problem can
-     * be handed over like a session's.
+     * be handed over like a session's. [extraBinds] are proot binds beyond the usual ones (a game
+     * library on an SD card), and [onProcess] gets the process as it starts, for a caller that may
+     * have to stop it.
      */
     fun run(context: Context, argv: List<String>, fakeRoot: Boolean = false, logName: String? = null,
+            extraBinds: List<String> = emptyList(), onProcess: ((Process) -> Unit)? = null,
             onLine: (String) -> Unit): Int {
         val log = logName?.let {
             try {
@@ -29,13 +32,14 @@ object GuestCommand {
         }
         log?.println("== ${java.util.Date()} ${argv.joinToString(" ")}")
         try {
-            return runLogged(context, argv, fakeRoot) { line -> log?.println(line); log?.flush(); onLine(line) }
+            return runLogged(context, argv, fakeRoot, extraBinds, onProcess) { line -> log?.println(line); log?.flush(); onLine(line) }
         } finally {
             log?.close()
         }
     }
 
-    private fun runLogged(context: Context, argv: List<String>, fakeRoot: Boolean, onLine: (String) -> Unit): Int {
+    private fun runLogged(context: Context, argv: List<String>, fakeRoot: Boolean, extraBinds: List<String>,
+                          onProcess: ((Process) -> Unit)?, onLine: (String) -> Unit): Int {
         val root = LinuxRuntime.rootDir(context)
         LinuxRuntime.writeAccounts(context)
         SessionFiles.stage(context, root)
@@ -45,6 +49,7 @@ object GuestCommand {
         val cmd = LinuxRuntime.prootPrefix(context, root, "/root", fakeRoot)
         LinuxRuntime.binds(context, null, runtimeDir, Environment.getExternalStorageDirectory(), null)
             .forEach { cmd.add("-b"); cmd.add(it) }
+        extraBinds.forEach { cmd.add("-b"); cmd.add(it) }
         cmd += listOf(
             "/usr/bin/env", "-i", "HOME=/root", "USER=root", "LANG=C.UTF-8",
             "PATH=/usr/local/bin:/usr/bin:/bin", "XDG_RUNTIME_DIR=${LinuxRuntime.GUEST_RUNTIME_DIR}",
@@ -62,6 +67,7 @@ object GuestCommand {
         val process = builder.start()
         val pid = HostProcess.pidOf(process)
         OrphanReaper.keep(pid)
+        onProcess?.invoke(process)
         try {
             process.inputStream.bufferedReader().useLines { lines -> lines.forEach(onLine) }
             return process.waitFor()

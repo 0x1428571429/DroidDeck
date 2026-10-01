@@ -76,6 +76,8 @@ internal fun StorePage(s: FrontEndState, a: FrontEndActions, modifier: Modifier)
     var openApp by rememberSaveable { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var category by rememberSaveable { mutableStateOf<String?>(null) }
+    // Which store the page shows: Flathub's apps, or the user's GOG games.
+    var store by rememberSaveable { mutableStateOf("flathub") }
     LaunchedEffect(s.ready) { StoreState.refresh(ctx) }
     LaunchedEffect(Unit) { StoreState.loadSections() }
     // A pad's focus sits on something the page is about to replace - the tile that opens an app,
@@ -103,8 +105,8 @@ internal fun StorePage(s: FrontEndState, a: FrontEndActions, modifier: Modifier)
     }
     Column(
         modifier = modifier.verticalScroll(scroll).padding(horizontal = padH, vertical = padV)
-            .bumpers(onPrevious = { if (openApp == null) switchTab((tab + TABS.size - 1) % TABS.size) },
-                     onNext = { if (openApp == null) switchTab((tab + 1) % TABS.size) }),
+            .bumpers(onPrevious = { if (openApp == null && store == "flathub") switchTab((tab + TABS.size - 1) % TABS.size) },
+                     onNext = { if (openApp == null && store == "flathub") switchTab((tab + 1) % TABS.size) }),
     ) {
         val id = openApp
         if (id != null) {
@@ -113,9 +115,24 @@ internal fun StorePage(s: FrontEndState, a: FrontEndActions, modifier: Modifier)
         }
         Rise(0) {
             PageHeader("Store") {
-                Chip("Flathub · ARM64", ok = false)
-                if (StoreState.ready) Chip("● Flatpak ready", ok = true)
+                if (store == "gog") {
+                    Chip("GOG · Windows games", ok = false)
+                    if (com.droiddeck.launcher.store.gog.GogState.signedIn) Chip("● Signed in", ok = true)
+                } else {
+                    Chip("Flathub · ARM64", ok = false)
+                    if (StoreState.ready) Chip("● Flatpak ready", ok = true)
+                }
             }
+        }
+        Rise(0) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 10.dp)) {
+                PillButton("Flathub", selected = store == "flathub") { store = "flathub" }
+                PillButton("GOG", selected = store == "gog") { store = "gog" }
+            }
+        }
+        if (store == "gog") {
+            GogStore(s)
+            return@Column
         }
         if (!s.ready) {
             Rise(1) { Note("Install the Linux runtime from Setup first; the store installs apps into it.") }

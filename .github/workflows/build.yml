@@ -298,6 +298,7 @@ jobs:
             grep -qx "$sym" <<<"$SESSION" || { echo "::error::libblsession.so does not export $sym"; exit 1; }
           done
           test -f "$D/usr/local/bin/bannerlator-session"
+          test -f "$D/usr/local/bin/bannerlator-gog"
           test -f "$D/usr/local/bin/bannerlator-proton-extra"
 
       - name: Cache the CMake build tree

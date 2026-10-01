@@ -219,9 +219,10 @@ def main():
     for game in games:
         if not game.get("exe") or not game.get("name"):
             continue
-        entry = shortcut(game)
+        # A store's own launch arguments (a GOG play task's) unless the user has set some in Steam.
+        entry = shortcut(game, game.get("args") or "")
         previous = managed.get(entry["appid"])
-        if previous and isinstance(previous.get("LaunchOptions"), str):
+        if previous and isinstance(previous.get("LaunchOptions"), str) and previous["LaunchOptions"]:
             entry["LaunchOptions"] = previous["LaunchOptions"]
         ours.append(entry)
     entries = {str(i): v for i, v in enumerate(kept + ours)}

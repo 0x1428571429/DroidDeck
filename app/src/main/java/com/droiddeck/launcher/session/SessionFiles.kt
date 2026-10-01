@@ -44,6 +44,8 @@ object SessionFiles {
             "usr/local/bin/bannerlator-steam-shortcuts" to "usr/local/bin/bannerlator-steam-shortcuts",
             "usr/local/bin/bannerlator-steam-games" to "usr/local/bin/bannerlator-steam-games",
             "usr/local/bin/bannerlator-pad-defaults" to "usr/local/bin/bannerlator-pad-defaults",
+            // GOG: the store's wrapper around Heroic's gogdl (which the app downloads itself).
+            "usr/local/bin/bannerlator-gog" to "usr/local/bin/bannerlator-gog",
             // Flatpak: the bwrap stand-in, the store's helper and setup, and the front end's launcher.
             "usr/local/bin/bannerlator-bwrap" to "usr/local/bin/bannerlator-bwrap",
             "usr/local/bin/bannerlator-flatpak" to "usr/local/bin/bannerlator-flatpak",
