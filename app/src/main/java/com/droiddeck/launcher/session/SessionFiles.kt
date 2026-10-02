@@ -30,6 +30,7 @@ object SessionFiles {
             "usr/local/bin/bannerlator-game-env" to "usr/local/bin/bannerlator-game-env",
             "libblsession.so" to "usr/local/lib/libblsession.so",
             "libblsession-x86_64.so" to "usr/local/lib/x86_64-linux-gnu/libblsession.so",
+            "libfakeinput-x86_64.so" to "usr/local/lib/x86_64-linux-gnu/libfakeinput.so",
             "libfakeinput.so" to "usr/local/lib/libfakeinput.so",
             "libblfastpath.so" to "usr/local/lib/libblfastpath.so",
             "usr/local/bin/bannerlator-session" to "usr/local/bin/bannerlator-session",

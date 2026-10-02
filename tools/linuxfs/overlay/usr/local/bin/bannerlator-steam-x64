@@ -66,6 +66,13 @@ if [ -f /usr/local/lib/x86_64-linux-gnu/libblsession.so ]; then
   mkdir -p "$ROOTFS/usr/local/lib"
   cp -f /usr/local/lib/x86_64-linux-gnu/libblsession.so "$ROOTFS/usr/local/lib/libblsession-x86_64.so"
   echo /usr/local/lib/libblsession-x86_64.so > "$ROOTFS/etc/ld.so.preload"
+  # The controller reader too: the session's pads (FAKE_EVDEV_*) exist for a program only through it.
+  if [ -f /usr/local/lib/x86_64-linux-gnu/libfakeinput.so ]; then
+    cp -f /usr/local/lib/x86_64-linux-gnu/libfakeinput.so "$ROOTFS/usr/local/lib/libfakeinput-x86_64.so"
+    echo /usr/local/lib/libfakeinput-x86_64.so >> "$ROOTFS/etc/ld.so.preload"
+  else
+    step "warning: no x86-64 controller reader (/usr/local/lib/x86_64-linux-gnu/libfakeinput.so); no pads in the client"
+  fi
 else
   step "warning: no x86-64 session shim (/usr/local/lib/x86_64-linux-gnu/libblsession.so); the client will stop on semget"
   : > "$ROOTFS/etc/ld.so.preload"
