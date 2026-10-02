@@ -55,13 +55,25 @@ login from its UI); `-cef-*` switches are not forwarded to the x86 web helper; t
 `CREATE_DUMB` errors are a red herring (40 fast ENOTTY per process); not an address-space problem
 (0 ENOMEM in 618k traced syscalls, although the device is 39-bit VA).
 
+Later the same day (device-proven unless noted):
+- **Controllers**: libfakeinput is now also built for x86-64 and preloaded in the FEX rootfs; the
+  client registers the pad, and **Big Picture works with it** (Xbox prompts, D-pad moves focus).
+- **Online**: the launcher starts the system bus and the NetworkManager stand-in like the session.
+- From an audit of `bannerlator-session`: stale lock cleanup, branch sync before every start, core
+  re-pinning, path cache and `perms.c` for `steamrt64`, the app's FEX preset (PERFORMANCE_TSO).
+- **Play button (built, not yet device-tested)**: Steam settings > Client > "Steam client: ARM64 /
+  x86-64 (FEX, experimental)" (`BL_STEAM_CLIENT_ARCH`). The session then starts the x86 client via
+  `bannerlator-steam-x64 --prepare/--exec` and gives it everything it gives the arm64 one; steps
+  only for the arm64 client (ARM64 Proton, mapping, seeding, Decky, steamclient.so probes) are
+  skipped.
+- L4D2 hard-link reuse does not work: switching platform makes Steam redownload depot 551 anyway.
+
 Open:
 - VAC test: L4D2's native Linux build in the x86 client's own library (hard-linked from the arm64
   copy, same filesystem, so only the Linux depots download). Native Linux games start inside the
   Steam Linux Runtime container (pressure-vessel) - expected to need the same treatment.
 - No x86 GPU driver: games render with llvmpipe. Playable needs FEX host thunks.
 - Windows games in the x86 client need x86 Proton = pressure-vessel.
-- Controllers in the x86 client (libfakeinput is arm64 only).
 - One client per account: integration would be a per-title hand-off, not side by side.
 
 ## 2026-09-29 - `feat/controller-input`: the pad the way SteamOS has it
