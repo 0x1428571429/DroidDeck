@@ -255,19 +255,33 @@ PY
   fi
 }
 
+# Whether the client draws on the GPU: FEX built with its host thunks (Vulkan and GL to the runtime's
+# own drivers), unless BL_X64_SOFTWARE=1. Without them, software rendering (llvmpipe).
+x64_gpu() {
+  [ "${BL_X64_SOFTWARE:-0}" != 1 ] && [ -d /usr/local/share/fex-emu/GuestThunks ] && [ -d /usr/local/lib/fex-emu/HostThunks ]
+}
+
 # The environment the client and everything it starts run in.
 x64_env() {
 # The arm64 session's library paths and preloads are aarch64 and mean nothing to x86 processes.
 unset LD_LIBRARY_PATH LD_PRELOAD STEAM_RUNTIME STEAM_RUNTIME_PREFER_HOST_LIBRARIES
-# So are the desktop's GPU settings: zink over the arm64 Turnip ICD. x86 Mesa has no driver for
-# this GPU, so software: llvmpipe for GL (the client's own window needs GLX), and the rootfs's
-# own Vulkan ICDs (lavapipe) found by the x86 loader instead of the arm64 one.
-unset GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE VK_ICD_FILENAMES VK_DRIVER_FILES LIBGL_KOPPER_DRI2 \
-  ZINK_DEBUG ZINK_DESCRIPTORS TU_DEBUG MESA_NO_ERROR
-export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
-# The X server hands out that node too (DRI3 open), and Mesa's software path then tries KMS dumb
-# buffers on it in a loop: present through plain X instead.
-export LIBGL_DRI3_DISABLE=1
+if x64_gpu; then
+  # FEX's host thunks: the x86 program's libvulkan and libGL calls run in the runtime's own arm64
+  # libraries - Turnip and Mesa on the GPU, with the session's settings for them (the Turnip ICD,
+  # Zink and its tuning), as the arm64 client has them.
+  printf '{"ThunksDB": {"GL": 1, "Vulkan": 1}}\n' > "$X64_HOME/thunks.json"
+  export FEX_THUNKCONFIG=$X64_HOME/thunks.json
+else
+  # So are the desktop's GPU settings: zink over the arm64 Turnip ICD. x86 Mesa has no driver for
+  # this GPU, so software: llvmpipe for GL (the client's own window needs GLX), and the rootfs's
+  # own Vulkan ICDs (lavapipe) found by the x86 loader instead of the arm64 one.
+  unset GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE VK_ICD_FILENAMES VK_DRIVER_FILES LIBGL_KOPPER_DRI2 \
+    ZINK_DEBUG ZINK_DESCRIPTORS TU_DEBUG MESA_NO_ERROR
+  export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+  # The X server hands out that node too (DRI3 open), and Mesa's software path then tries KMS dumb
+  # buffers on it in a loop: present through plain X instead.
+  export LIBGL_DRI3_DISABLE=1
+fi
 # The proot fast path (libblfastpath, preloaded into every guest process, FEX included) stands down
 # by itself when FEX is about to run a 32-bit program (it broke FEX's 32-bit mode: SIGILL at start);
 # 64-bit ones keep it. BL_X64_FP_OFF=1 turns it off for everything, as before.
@@ -314,6 +328,7 @@ x64_exec() {
 case "${1:-}" in
   --prepare) x64_prepare; exit 0 ;;
   --exec) shift; x64_exec "$@" ;;
+  --gpu) x64_gpu; exit $? ;;
 esac
 
 # --- standalone (the desktop menu entry) ------------------------------------------------------
@@ -400,7 +415,8 @@ for attempt in 1 2 3 4 5; do
   echo publicbeta > "$STEAM_X64/package/beta"
   step "starting the x86-64 SteamRT3 client under FEX (attempt $attempt): $*"
   rc=0
-  ( x64_exec -clientbeta publicbeta -no-cef-sandbox -cef-disable-gpu "$@" ) >>"$LOG" 2>&1 || rc=$?
+  if x64_gpu; then cef=(-cef-force-gpu -cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan); else cef=(-cef-disable-gpu); fi
+  ( x64_exec -clientbeta publicbeta -no-cef-sandbox "${cef[@]}" "$@" ) >>"$LOG" 2>&1 || rc=$?
   step "client exited rc=$rc"
   [ "$rc" = 42 ] || break
 done

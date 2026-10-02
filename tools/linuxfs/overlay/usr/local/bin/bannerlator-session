@@ -259,8 +259,13 @@ case $mode in
       step "x86-64 Steam client ready"
       steam_root=${BL_X64_HOME:-$HOME/.droiddeck-x64}/.local/share/Steam
       steam_client=(bannerlator-steam-x64 --exec)
-      # No x86 GPU driver: the interface renders in software.
-      steam_cef=(-cef-disable-gpu)
+      # On the GPU when FEX has its host thunks (Vulkan/GL to Turnip and Mesa), as the arm64 client
+      # draws; in software otherwise.
+      if bannerlator-steam-x64 --gpu; then
+        steam_cef=(-cef-force-gpu -cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan)
+      else
+        steam_cef=(-cef-disable-gpu)
+      fi
     else
       step "checking the Steam client (first run downloads it, ~1-2 min with nothing on screen)"
       bannerlator-steam-install || exit $?
