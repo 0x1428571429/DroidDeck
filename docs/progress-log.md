@@ -87,6 +87,14 @@ Evening (device-proven unless noted):
   uses them when installed (GPU mode, the arm64 client's ANGLE-on-Vulkan flags) - built, not yet
   device-tested.
 - The proot fast path now stands down in FEX only for 32-bit programs (it broke FEX's 32-bit mode).
+- **On the GPU, VAC proven (19:40):** games get FEX's host thunks and the session's Turnip/Zink
+  settings (the client and its browser stay in software: with the thunks the browser's GPU process
+  dies and the client never opens a window). Left 4 Dead 2 in The Passing on an online server:
+  51 fps (was ~11 in software). The server answered the A2S info query as "Valve Left4Dead 2 US
+  East Server", VAC=1 - an official VAC-secured server, which the arm64 client is refused.
+- The crash that held this up was not the GPU: the 32-bit controller reader was still preloaded
+  (FEX falls through to the session's own i386 copy), and the game's SDL2 strdup()s a NULL udev
+  attribute of its fake devices. Found with a SIGSEGV logger (tools/diag/segvlog.c).
 - The Linux FEX as a component file: /sdcard/Download/FEX-2609-r2-x86-64-guest.wcp (type
   FEX-Guest); the Components section does not know that type yet.
 
