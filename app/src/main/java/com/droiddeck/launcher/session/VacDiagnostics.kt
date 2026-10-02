@@ -42,7 +42,11 @@ object VacDiagnostics {
     private const val MAX_QUOTED = 40
 
     private val INSECURE = Regex("insecure mode", RegexOption.IGNORE_CASE)
-    private val CONNECTED = Regex("^(Connected to|Connecting to|Connection to game coordinator)", RegexOption.IGNORE_CASE)
+    // "Connecting to" is only an attempt: L4D2 logs it, retries, and then refuses a VAC server with a
+    // dialog ("Connection Blocked: Please remove plug-ins before attempting to connect to a VAC
+    // secured server") that never reaches the console. Only "Connected to" means the game got in.
+    private val CONNECTED = Regex("^Connected to", RegexOption.IGNORE_CASE)
+    private val ATTEMPTED = Regex("^Connecting to", RegexOption.IGNORE_CASE)
     private val NOTABLE = Regex("\\bVAC\\b|secure|Connected to|Connecting to|Disconnect|challenge|game coordinator", RegexOption.IGNORE_CASE)
     private val STEAM_VAC = Regex("\\bVAC\\b|anti-?cheat", RegexOption.IGNORE_CASE)
 
@@ -118,7 +122,11 @@ object VacDiagnostics {
         lines.any { INSECURE.containsMatchIn(it) } ->
             "INSECURE - the game started in insecure mode and cannot join VAC-secured servers until it restarts."
         lines.any { CONNECTED.containsMatchIn(it) } ->
-            "No insecure notice, and the game reached a server. Confirm with the server's own info that it is VAC-secured."
+            "No insecure notice, and the game connected to a server. Confirm with the server's own info that it is VAC-secured."
+        lines.any { ATTEMPTED.containsMatchIn(it) } ->
+            "NOT CONNECTED - the game tried a server and never got in. If the screen said \"Connection Blocked: " +
+                "Please remove plug-ins ... VAC secured server\" (Left 4 Dead 2's wording), the game is insecure; " +
+                "that dialog never reaches the console."
         else ->
             "Inconclusive - the game never connected to a server. Join a VAC-secured server, then check again."
     }
