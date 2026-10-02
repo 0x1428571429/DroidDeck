@@ -224,6 +224,9 @@ VDF
 verb=$1; shift
 rt=$HOME/.local/share/Steam/ubuntu12_32/steam-runtime.old
 [ -x "$rt/run.sh" ] || rt=$HOME/.local/share/Steam/ubuntu12_32/steam-runtime
+# Source games keep their console in console.log (-condebug): what the VAC diagnostics read - the
+# server they joined and whether it is secure.
+case "$*" in *hl2.sh*|*hl2_linux*|*srcds*) set -- "$@" -condebug ;; esac
 # GL threading is a GPU-path tuning from the session; with software GL under FEX it is no help.
 [ -n "${LIBGL_ALWAYS_SOFTWARE:-}" ] && export mesa_glthread=false
 case $verb in
