@@ -1,15 +1,18 @@
 #!/bin/bash
 # EXPERIMENT, opt-in: Valve's x86-64 Linux Steam client under FEX, beside the default arm64 one.
-#   bannerlator-steam-x64 [steam:// URL or client arguments]
+#   bannerlator-steam-x64 [steam:// URL or client arguments]   run it (the desktop menu entry)
+#   bannerlator-steam-x64 --prepare                            install and set up, then exit
+#   bannerlator-steam-x64 --exec ARGS...                       run the client binary with ARGS in
+#                                                              its environment (bannerlator-session
+#                                                              with BL_STEAM_CLIENT_ARCH=x86_64)
 #
 # Why: the arm64 Linux client never runs VAC (TF2, L4D2: "Connection Blocked ... VAC secured
 # server", no VAC line in any client log) - VAC modules are x86 code. The x86-64 client under FEX
 # has a module it can run, the way SteamLite does in Wine. This runs Valve's client unchanged.
 #
 # Everything lives in its own home ($X64_HOME): the x86 client gets its own ~/.steam links, its
-# own login and its own config, and never touches the arm64 client's. Games are shared: its
-# steamapps is the arm64 client's. Only one client runs at a time (same account), so the arm64
-# one is shut down first.
+# own login, config and library, and never touches the arm64 client's. Only one client runs at a
+# time (same account), so the arm64 one is shut down first.
 #
 # First run downloads FEX (this repo's release), FEX's Ubuntu 24.04 x86 rootfs (~525 MB, unpacked
 # ~1.5 GB) and the x86 client (~600 MB). Log: $X64_HOME/steam-x64.log.
@@ -30,6 +33,7 @@ LOG=$X64_HOME/steam-x64.log
 mkdir -p "$X64_HOME"
 step() { echo "== $(date -u +%H:%M:%S) $*" | tee -a "$LOG"; }
 
+x64_prepare() {
 # --- FEX -------------------------------------------------------------------------------------
 if [ ! -x /usr/local/bin/FEX ] || [ "$(cat /usr/local/share/fex-emu/.droiddeck-tag 2>/dev/null)" != "$FEX_TAG" ]; then
   step "downloading FEX ($FEX_TAG)"
@@ -77,7 +81,6 @@ else
   step "warning: no x86-64 session shim (/usr/local/lib/x86_64-linux-gnu/libblsession.so); the client will stop on semget"
   : > "$ROOTFS/etc/ld.so.preload"
 fi
-
 # --- the x86-64 client -------------------------------------------------------------------------
 if [ ! -x "$STEAM_X64/steamrt64/steam" ] || [ ! -f "$STEAM_X64/package/droiddeck-installed" ]; then
   step "downloading the x86-64 Steam client ($MANIFEST)"
@@ -108,59 +111,14 @@ if [ ! -x "$STEAM_X64/steamrt64/steam" ] || [ ! -f "$STEAM_X64/package/droiddeck
   echo "$version" > "$STEAM_X64/package/droiddeck-installed"
   chmod +x "$STEAM_X64/steam.sh" "$STEAM_X64/steamrt64/steam" "$STEAM_X64/ubuntu12_32/steam" 2>/dev/null || true
 fi
-# Shared games: the arm64 client's library, as long as it is not running at the same time.
-if [ -d "$ARM_STEAM/steamapps" ] && [ ! -e "$STEAM_X64/steamapps" ]; then
-  ln -s "$ARM_STEAM/steamapps" "$STEAM_X64/steamapps"
-fi
-
-# --- one client at a time ----------------------------------------------------------------------
-if pgrep -f 'steamrtarm64/steam( |$)' >/dev/null 2>&1; then
-  step "shutting down the arm64 client first"
-  "$ARM_STEAM/steamrtarm64/steam" -shutdown >/dev/null 2>&1 || true
-  for _ in $(seq 1 30); do pgrep -f 'steamrtarm64/steam( |$)' >/dev/null 2>&1 || break; sleep 1; done
-fi
-
-# --- run ---------------------------------------------------------------------------------------
-# The arm64 session's library paths and preloads are aarch64 and mean nothing to x86 processes.
-unset LD_LIBRARY_PATH LD_PRELOAD STEAM_RUNTIME STEAM_RUNTIME_PREFER_HOST_LIBRARIES
-# So are the desktop's GPU settings: zink over the arm64 Turnip ICD. x86 Mesa has no driver for
-# this GPU, so software: llvmpipe for GL (the client's own window needs GLX), and the rootfs's
-# own Vulkan ICDs (lavapipe) found by the x86 loader instead of the arm64 one.
-unset GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE VK_ICD_FILENAMES VK_DRIVER_FILES LIBGL_KOPPER_DRI2 \
-  ZINK_DEBUG ZINK_DESCRIPTORS TU_DEBUG MESA_NO_ERROR
-export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+# Its own library: the arm64 client's Windows installs are not what this client runs (it would
+# switch a shared install to the Linux build and the arm64 client would download it again).
+[ -L "$STEAM_X64/steamapps" ] && rm -f "$STEAM_X64/steamapps"
+mkdir -p "$STEAM_X64/steamapps"
 # They still enumerate /dev/dri, find the session's KGSL node there, and spin on it (x86 Turnip
 # "failed to query kernel driver version", KMS dumb-buffer ioctls in a loop) - the webhelper never
 # got a browser up. FEX looks in the rootfs first: an empty /dev/dri there hides the node.
 mkdir -p "$ROOTFS/dev/dri"
-# The X server hands out that node too (DRI3 open), and Mesa's software path then tries KMS dumb
-# buffers on it in a loop: present through plain X instead.
-export LIBGL_DRI3_DISABLE=1
-# The proot fast path (libblfastpath, preloaded into every guest process, FEX included) breaks
-# FEX's 32-bit mode: every i386 program dies with SIGILL at start (FEX's own fatal trap), so
-# Steam's 32-bit check reports libc.so.6 missing. 64-bit runs either way; proot then answers
-# FEX's path calls itself.
-export PROOT_FP_OFF=1
-# FEX tuning: the app's default preset for games (core/FexPreset.kt PERFORMANCE_TSO, WinNative's
-# default) - FEX's own defaults keep half-barrier TSO and full-precision x87, which cost every x86
-# program time. A value already in the environment wins.
-export FEX_TSOENABLED=${FEX_TSOENABLED:-1} FEX_VECTORTSOENABLED=${FEX_VECTORTSOENABLED:-0} \
-  FEX_MEMCPYSETTSOENABLED=${FEX_MEMCPYSETTSOENABLED:-0} FEX_HALFBARRIERTSOENABLED=${FEX_HALFBARRIERTSOENABLED:-0} \
-  FEX_X87REDUCEDPRECISION=${FEX_X87REDUCEDPRECISION:-1} FEX_MULTIBLOCK=${FEX_MULTIBLOCK:-1}
-export HOME=$X64_HOME
-export FEX_ROOTFS=$ROOTFS
-# A FEX process takes its rootfs from FEXServer, not from its own environment, and a server
-# started earlier without FEX_ROOTFS (any FEX run in this guest) answers with no rootfs at all:
-# every x86 library lookup then falls through to the arm64 guest. Stop it, so the next FEX
-# starts one with this rootfs.
-/usr/local/bin/FEXServer -k >/dev/null 2>&1 || true
-# BL_FEXSERVER_LOG: a FEXServer of our own in the foreground, logging there - every FEX process that
-# logs to "server" (FEX_OUTPUTLOG, or an AppConfig) then has its lines tagged with its pid.
-if [ -n "${BL_FEXSERVER_LOG:-}" ]; then
-  "$(dirname "${BL_FEX:-/usr/local/bin/FEX}")/FEXServer" -f -p 600 >"$BL_FEXSERVER_LOG" 2>&1 &
-  sleep 1
-fi
-export STEAM_EXTRA_COMPAT_TOOLS_PATHS=
 # What steam.sh sets up before it runs the client, for the x86 tree.
 mkdir -p "$X64_HOME/.steam"
 ln -sfn "$STEAM_X64" "$X64_HOME/.steam/root"
@@ -169,11 +127,6 @@ ln -sfn "$STEAM_X64/ubuntu12_32" "$X64_HOME/.steam/bin32"
 ln -sfn "$STEAM_X64/ubuntu12_64" "$X64_HOME/.steam/bin64"
 ln -sfn "$STEAM_X64/linux32" "$X64_HOME/.steam/sdk32"
 ln -sfn "$STEAM_X64/linux64" "$X64_HOME/.steam/sdk64"
-# Valve's 64-bit SteamRT3 client (steamrt64/steam), the x86 twin of the arm64 one, started the way
-# the session starts that one (bannerlator-session): directly, STEAM_RUNTIME=1, its own library
-# folders first. Through steam.sh it would first run steam-runtime-check-requirements, whose
-# bwrap probe needs user namespaces - proot has none. Software rendering: no x86 GPU driver.
-export STEAM_RUNTIME=1
 # Unlike the arm64 client, this one carries pressure-vessel (steamrt64/pv-runtime) and refuses to
 # start when steam-runtime-check-requirements' bwrap probe cannot make a user namespace, which no
 # Android app can. proot is the container here, as it is for the arm64 client, which has no such
@@ -195,9 +148,7 @@ if [ -d "$srt_real" ]; then
 exit 0
 ' > "$srt_shim/bin/steam-runtime-check-requirements"
   chmod 755 "$srt_shim/bin/steam-runtime-check-requirements"
-  export STEAM_RUNTIME_STEAMRT=$srt_shim
 fi
-export LD_LIBRARY_PATH=$STEAM_X64/steamrt64:$STEAM_X64/steamrt64/panorama
 # The libraries the SteamRT container would give the client and the rootfs lacks (GTK 2 for
 # steamui.so, ...): Valve's own platform runtime files, for what the rootfs does not have.
 # They ship without their soname links (pressure-vessel makes those when it builds the container),
@@ -210,14 +161,58 @@ for d in "$STEAM_X64"/steamrt64/pv-runtime/steam-runtime-steamrt/steamrt3c_platf
   [ -d "$d" ] || continue
   for f in "$d"/*.so*; do [ -e "$srt_libs/$(basename "$f")" ] || ln -s "$f" "$srt_libs/"; done
 done
-/usr/local/bin/FEX "$ROOTFS/usr/sbin/ldconfig.real" -n "$srt_libs" >>"$LOG" 2>&1 || step "ldconfig on $srt_libs failed"
+FEX_ROOTFS=$ROOTFS /usr/local/bin/FEX "$ROOTFS/usr/sbin/ldconfig.real" -n "$srt_libs" >>"$LOG" 2>&1 || step "ldconfig on $srt_libs failed"
 # LD_LIBRARY_PATH beats the system folders whatever its order, so only what the rootfs lacks stays:
 # the platform's own (older) glibc and the rest must not shadow the rootfs's.
 for f in "$srt_libs"/*; do
   n=$(basename "$f")
   if [ -e "$ROOTFS/usr/lib/x86_64-linux-gnu/$n" ] || [ -e "$ROOTFS/lib/x86_64-linux-gnu/$n" ]; then rm -f "$f"; fi
 done
-LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$srt_libs
+  # A FEX process takes its rootfs from FEXServer, not from its own environment, and a server
+  # started earlier without FEX_ROOTFS (any FEX run in this guest) answers with no rootfs at all:
+  # every x86 library lookup then falls through to the arm64 guest. Stop it while no x86 client
+  # runs, so the next FEX starts one with this rootfs.
+  if ! pgrep -f 'steamrt64/steam( |$)' >/dev/null 2>&1; then
+    FEX_ROOTFS=$ROOTFS /usr/local/bin/FEXServer -k >/dev/null 2>&1 || true
+  fi
+}
+
+# The environment the client and everything it starts run in.
+x64_env() {
+# The arm64 session's library paths and preloads are aarch64 and mean nothing to x86 processes.
+unset LD_LIBRARY_PATH LD_PRELOAD STEAM_RUNTIME STEAM_RUNTIME_PREFER_HOST_LIBRARIES
+# So are the desktop's GPU settings: zink over the arm64 Turnip ICD. x86 Mesa has no driver for
+# this GPU, so software: llvmpipe for GL (the client's own window needs GLX), and the rootfs's
+# own Vulkan ICDs (lavapipe) found by the x86 loader instead of the arm64 one.
+unset GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE VK_ICD_FILENAMES VK_DRIVER_FILES LIBGL_KOPPER_DRI2 \
+  ZINK_DEBUG ZINK_DESCRIPTORS TU_DEBUG MESA_NO_ERROR
+export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+# The X server hands out that node too (DRI3 open), and Mesa's software path then tries KMS dumb
+# buffers on it in a loop: present through plain X instead.
+export LIBGL_DRI3_DISABLE=1
+# The proot fast path (libblfastpath, preloaded into every guest process, FEX included) breaks
+# FEX's 32-bit mode: every i386 program dies with SIGILL at start (FEX's own fatal trap), so
+# Steam's 32-bit check reports libc.so.6 missing. 64-bit runs either way; proot then answers
+# FEX's path calls itself.
+export PROOT_FP_OFF=1
+# FEX tuning: the app's default preset for games (core/FexPreset.kt PERFORMANCE_TSO, WinNative's
+# default) - FEX's own defaults keep half-barrier TSO and full-precision x87, which cost every x86
+# program time. A value already in the environment wins.
+export FEX_TSOENABLED=${FEX_TSOENABLED:-1} FEX_VECTORTSOENABLED=${FEX_VECTORTSOENABLED:-0} \
+  FEX_MEMCPYSETTSOENABLED=${FEX_MEMCPYSETTSOENABLED:-0} FEX_HALFBARRIERTSOENABLED=${FEX_HALFBARRIERTSOENABLED:-0} \
+  FEX_X87REDUCEDPRECISION=${FEX_X87REDUCEDPRECISION:-1} FEX_MULTIBLOCK=${FEX_MULTIBLOCK:-1}
+export HOME=$X64_HOME
+# The session points these at the arm64 client's home; this client has its own.
+export XDG_DATA_HOME=$X64_HOME/.local/share XDG_CONFIG_HOME=$X64_HOME/.config XDG_CACHE_HOME=$X64_HOME/.cache
+export FEX_ROOTFS=$ROOTFS
+export STEAM_EXTRA_COMPAT_TOOLS_PATHS=
+# Valve's 64-bit SteamRT3 client (steamrt64/steam), the x86 twin of the arm64 one, started the way
+# the session starts that one (bannerlator-session): directly, STEAM_RUNTIME=1, its own library
+# folders first. Through steam.sh it would first run steam-runtime-check-requirements, whose
+# bwrap probe needs user namespaces - proot has none. Software rendering: no x86 GPU driver.
+export STEAM_RUNTIME=1
+[ -d "$X64_HOME/steamrt-shim" ] && export STEAM_RUNTIME_STEAMRT=$X64_HOME/steamrt-shim
+export LD_LIBRARY_PATH=$STEAM_X64/steamrt64:$STEAM_X64/steamrt64/panorama:$X64_HOME/steamrt-libs
 # After an update the client re-executes itself inside the SteamRT container through
 # pressure-vessel-wrap, which needs bwrap. The FEX rootfs with the client's own steamrt64 libraries
 # is that container here; the client's recursion guard says it is already inside one.
@@ -226,11 +221,36 @@ export STEAM_STEAMRT_RECURSION_GUARD=1
 # first failed assertion: the web helper died of SIGTRAP a second after every start. The session
 # shim hides the tracer from the x86 web helper too (preload/tracer.c).
 export BL_WEBHELPER_HIDE_TRACER=1
-cd "$STEAM_X64"
-# The webhelper on Wayland: on X11, Chromium sets up GBM on the render node the X server hands out
-# over DRI3 even with the GPU off, loops on KMS dumb-buffer ioctls against the KGSL device and never
-# brings a browser up (the client restarts it every 10 s). On Wayland without a GPU it draws to
-# shared-memory buffers.
+}
+
+# The client binary under FEX, for the session: the starting arguments, or -shutdown / a steam://
+# URL handed to the running instance.
+x64_exec() {
+  x64_env
+  cd "$STEAM_X64"
+  exec "${BL_FEX:-/usr/local/bin/FEX}" "$STEAM_X64/steamrt64/steam" "$@"
+}
+
+case "${1:-}" in
+  --prepare) x64_prepare; exit 0 ;;
+  --exec) shift; x64_exec "$@" ;;
+esac
+
+# --- standalone (the desktop menu entry) ------------------------------------------------------
+# --- one client at a time ----------------------------------------------------------------------
+if pgrep -f 'steamrtarm64/steam( |$)' >/dev/null 2>&1; then
+  step "shutting down the arm64 client first"
+  "$ARM_STEAM/steamrtarm64/steam" -shutdown >/dev/null 2>&1 || true
+  for _ in $(seq 1 30); do pgrep -f 'steamrtarm64/steam( |$)' >/dev/null 2>&1 || break; sleep 1; done
+fi
+x64_prepare
+step "FEX, rootfs and client ready"
+# BL_FEXSERVER_LOG: a FEXServer of our own in the foreground, logging there - every FEX process that
+# logs to "server" (FEX_OUTPUTLOG, or an AppConfig) then has its lines tagged with its pid.
+if [ -n "${BL_FEXSERVER_LOG:-}" ]; then
+  FEX_ROOTFS=$ROOTFS "$(dirname "${BL_FEX:-/usr/local/bin/FEX}")/FEXServer" -f -p 600 >"$BL_FEXSERVER_LOG" 2>&1 &
+  sleep 1
+fi
 # --- what bannerlator-session gives the arm64 client ---------------------------------------
 # The client's connection header and Settings > Internet come from NetworkManager on the SYSTEM
 # bus; without them it shows no connection while downloads run. Same bus config and stand-in as the
@@ -300,9 +320,7 @@ for attempt in 1 2 3 4 5; do
   echo publicbeta > "$STEAM_X64/package/beta"
   step "starting the x86-64 SteamRT3 client under FEX (attempt $attempt): $*"
   rc=0
-  "${BL_FEX:-/usr/local/bin/FEX}" "$STEAM_X64/steamrt64/steam" -clientbeta publicbeta -no-cef-sandbox \
-    -cef-ozone-platform=wayland -cef-disable-gpu "$@" >>"$LOG" 2>&1 || rc=$?
+  ( x64_exec -clientbeta publicbeta -no-cef-sandbox -cef-disable-gpu "$@" ) >>"$LOG" 2>&1 || rc=$?
   step "client exited rc=$rc"
   [ "$rc" = 42 ] || break
 done
-exit "$rc"

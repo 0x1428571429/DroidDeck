@@ -72,6 +72,7 @@ class ModeSettings(
     val stretch16x9: Boolean? = null,
     /** Steam only: the client branch forced on the command line. */
     val steamChannel: String? = null,
+    val steamClientArch: String? = null,
     /** Steam only: enable the SteamOS client interface and its performance controls. */
     val steamDeckMode: Boolean = false,
     /** Steam, Deck mode: the QAM's performance overlay (mangoapp) is started. */
@@ -121,6 +122,7 @@ class ModeSettingsActions(
     val onForceFullscreen: (Boolean) -> Unit = {},
     val onStretch16x9: (Boolean) -> Unit = {},
     val onSteamChannel: (String) -> Unit = {},
+    val onSteamClientArch: (String) -> Unit = {},
     val onSteamDeckMode: (Boolean) -> Unit = {},
     val onMangoapp: (Boolean) -> Unit = {},
     val onSteamController: (String) -> Unit = {},
@@ -324,6 +326,11 @@ fun ModeSettingsPage(s: ModeSettings, a: ModeSettingsActions) {
                 listOf("publicbeta" to stringResource(R.string.mode_branch_public), "steamdeck_publicbeta" to stringResource(R.string.mode_branch_deck_beta)), s.steamChannel,
                 note = stringResource(R.string.mode_branch_note),
                 onPick = a.onSteamChannel,
+            )
+            if (s.steamClientArch != null) ChoiceRow(
+                host, "clientArch", stringResource(R.string.mode_client_arch), stringResource(R.string.mode_client_arch_hint),
+                listOf("arm64" to stringResource(R.string.mode_client_arch_arm64), "x86_64" to stringResource(R.string.mode_client_arch_x64)), s.steamClientArch,
+                onPick = a.onSteamClientArch,
             )
         }
         if (steam && s.addedGamesDirs != null) SettingsGroup(stringResource(R.string.mode_added_games)) {

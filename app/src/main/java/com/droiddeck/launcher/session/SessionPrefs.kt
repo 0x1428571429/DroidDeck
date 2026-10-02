@@ -485,6 +485,17 @@ object SessionPrefs {
         prefs(context).edit().putString("steamChannel", id).apply()
     }
 
+    /**
+     * Which Steam client a Steam session runs: "arm64" (Valve's native ARM64 client, the default) or
+     * "x86_64" (Valve's x86-64 client under FEX, bannerlator-steam-x64 - experimental, for what the
+     * arm64 client cannot do: it never runs VAC). Each has its own sign-in and library.
+     */
+    fun steamClientArch(context: Context): String = prefs(context).getString("steamClientArch", null) ?: "arm64"
+
+    fun setSteamClientArch(context: Context, id: String) {
+        prefs(context).edit().putString("steamClientArch", id).apply()
+    }
+
     /** Whether opening DroidDeck starts a Steam session instead of showing the front end. */
     fun runSteamAtStartup(context: Context): Boolean = prefs(context).getBoolean("runSteamAtStartup", false)
 
