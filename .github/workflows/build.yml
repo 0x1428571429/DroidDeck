@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  PRELOAD_CACHE_VERSION: v2
+  PRELOAD_CACHE_VERSION: v3
 
 jobs:
   build:
@@ -176,6 +176,12 @@ jobs:
           aarch64-linux-gnu-gcc -shared -fPIC -O2 -Wall -pthread \
             -o "$D/libblsession.so" tools/linuxfs/preload/*.c -ldl
           aarch64-linux-gnu-strip --strip-unneeded "$D/libblsession.so"
+          # The same session shim for x86-64 programs under FEX (bannerlator-steam-x64): the x86
+          # Steam client needs its System V semaphores just as the arm64 one does. Native gcc on
+          # this runner; Ubuntu 24.04's glibc is the one in FEX's Ubuntu 24.04 rootfs.
+          gcc -shared -fPIC -O2 -Wall -pthread \
+            -o "$D/libblsession-x86_64.so" tools/linuxfs/preload/*.c -ldl
+          strip --strip-unneeded "$D/libblsession-x86_64.so"
           aarch64-linux-gnu-gcc -shared -fPIC -O2 -Wall -pthread \
             -o "$D/libblfastpath.so" tools/proot/fastpath/fastpath.c -ldl
           aarch64-linux-gnu-strip --strip-unneeded "$D/libblfastpath.so"

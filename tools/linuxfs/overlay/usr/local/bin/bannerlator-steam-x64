@@ -59,9 +59,15 @@ if [ ! -f "$ROOTFS/.droiddeck-complete" ]; then
   rm -f "$X64_HOME/rootfs.sqsh"
   touch "$ROOTFS/.droiddeck-complete"
 fi
-# A path missing from the rootfs falls through to the guest: without its own, the x86 loader
-# reads the guest's /etc/ld.so.preload and tries to load the session's arm64 preloads.
-if [ ! -e "$ROOTFS/etc/ld.so.preload" ]; then
+# The rootfs's own ld.so.preload: a path missing from the rootfs falls through to the guest, whose
+# list names the session's arm64 preloads. In it, the session shim built for x86-64 (System V IPC,
+# which Android kernels lack: the client's tier0 gives up on start without its semaphore).
+if [ -f /usr/local/lib/x86_64-linux-gnu/libblsession.so ]; then
+  mkdir -p "$ROOTFS/usr/local/lib"
+  cp -f /usr/local/lib/x86_64-linux-gnu/libblsession.so "$ROOTFS/usr/local/lib/libblsession-x86_64.so"
+  echo /usr/local/lib/libblsession-x86_64.so > "$ROOTFS/etc/ld.so.preload"
+else
+  step "warning: no x86-64 session shim (/usr/local/lib/x86_64-linux-gnu/libblsession.so); the client will stop on semget"
   : > "$ROOTFS/etc/ld.so.preload"
 fi
 
