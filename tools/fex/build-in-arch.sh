@@ -1,6 +1,6 @@
 #!/usr/bin/bash
 # Runs INSIDE an Arch Linux ARM container (menci/archlinuxarm:base-devel) on an arm64 runner.
-# Builds FEX for the runtime (Arch Linux ARM ships no package and FEX publishes no Linux
+# Builds FEX for the runtime, with tools/fex/patches, (Arch Linux ARM ships no package and FEX publishes no Linux
 # binaries), plus the runtime's own unsquashfs to unpack FEX's x86 rootfs image, and packs both
 # as fex.tzst (usr/local/...) for bannerlator-steam-x64 to stage. No thunks: they need an x86
 # cross toolchain, and the x86-64 Steam client only needs FEX to run, not host GPU drivers.
@@ -15,6 +15,9 @@ mv /etc/pacman.d/mirrorlist.new /etc/pacman.d/mirrorlist
 pacman -Syu --noconfirm --needed git zstd binutils cmake ninja clang lld llvm python squashfs-tools file
 
 rm -rf fex-src out && git clone -q --depth 1 --branch "$VERSION" --recurse-submodules --shallow-submodules https://github.com/FEX-Emu/FEX.git fex-src
+# Our proot answers openat2 with ENOSYS (tools/proot/PATCHES.md, 0008); FEX opened every rootfs
+# path with openat2 and fell through to the arm64 guest's files on anything but EXDEV.
+for p in tools/fex/patches/*.patch; do patch -d fex-src -p1 --no-backup-if-mismatch < "$p"; done
 # TUNE_CPU none: the default (native) would tune for the runner's Neoverse cores, not the device.
 cmake -S fex-src -B fex-build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
