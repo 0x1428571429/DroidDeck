@@ -116,6 +116,12 @@ fi
 # --- run ---------------------------------------------------------------------------------------
 # The arm64 session's library paths and preloads are aarch64 and mean nothing to x86 processes.
 unset LD_LIBRARY_PATH LD_PRELOAD STEAM_RUNTIME STEAM_RUNTIME_PREFER_HOST_LIBRARIES
+# So are the desktop's GPU settings: zink over the arm64 Turnip ICD. x86 Mesa has no driver for
+# this GPU, so software: llvmpipe for GL (the client's own window needs GLX), and the rootfs's
+# own Vulkan ICDs (lavapipe) found by the x86 loader instead of the arm64 one.
+unset GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE VK_ICD_FILENAMES VK_DRIVER_FILES LIBGL_KOPPER_DRI2 \
+  ZINK_DEBUG ZINK_DESCRIPTORS TU_DEBUG MESA_NO_ERROR
+export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 # The proot fast path (libblfastpath, preloaded into every guest process, FEX included) breaks
 # FEX's 32-bit mode: every i386 program dies with SIGILL at start (FEX's own fatal trap), so
 # Steam's 32-bit check reports libc.so.6 missing. 64-bit runs either way; proot then answers
