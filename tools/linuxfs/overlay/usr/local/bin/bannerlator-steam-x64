@@ -72,8 +72,11 @@ fi
 : > "$ROOTFS/etc/ld.so.preload"
 for lib in libblsession libfakeinput; do
   have=0
-  # The 32-bit controller reader crashes Left 4 Dead 2 (segfault right after its GL start-up): until
-  # it is fixed, 32-bit programs get only the session shim.
+  # The 32-bit controller reader crashes Left 4 Dead 2: its fake devices reach the game's own SDL2
+  # through udev with a missing attribute, and SDL strdup()s the NULL (device, segvlog: strlen in
+  # libc <- __strdup <- libSDL2 <- udev_device_get_sysattr_value). Until it is fixed, 32-bit
+  # programs get only the session shim; its preload line names the x86_64 copy outright, since
+  # with $LIB FEX falls through to the session's own /usr/local/lib/i386-linux-gnu copy.
   arches="x86_64 i386"; [ "$lib" = libfakeinput ] && arches=x86_64
   rm -f "$ROOTFS/usr/local/lib/i386-linux-gnu/libfakeinput.so"
   for arch in $arches; do
@@ -82,7 +85,9 @@ for lib in libblsession libfakeinput; do
     cp -f "/usr/local/lib/$arch-linux-gnu/$lib.so" "$ROOTFS/usr/local/lib/$arch-linux-gnu/$lib.so"
     have=1
   done
-  if [ "$have" = 1 ]; then echo "/usr/local/\$LIB/$lib.so" >> "$ROOTFS/etc/ld.so.preload"
+  if [ "$have" = 1 ] && [ "$lib" = libfakeinput ]; then
+    echo "/usr/local/lib/x86_64-linux-gnu/$lib.so" >> "$ROOTFS/etc/ld.so.preload"
+  elif [ "$have" = 1 ]; then echo "/usr/local/\$LIB/$lib.so" >> "$ROOTFS/etc/ld.so.preload"
   else step "warning: no x86 build of $lib (/usr/local/lib/x86_64-linux-gnu/$lib.so)"; fi
 done
 rm -f "$ROOTFS/usr/local/lib/libblsession-x86_64.so" "$ROOTFS/usr/local/lib/libfakeinput-x86_64.so"
@@ -228,10 +233,12 @@ rt=$HOME/.local/share/Steam/ubuntu12_32/steam-runtime.old
 # server they joined and whether it is secure.
 case "$*" in *hl2.sh*|*hl2_linux*|*srcds*) set -- "$@" -condebug ;; esac
 # The GPU: FEX's host thunks and the session's GPU settings, saved by the launcher (the client
-# itself draws in software). BL_X64_GAME_SOFTWARE=1 keeps the game in software too.
+# itself draws in software). BL_X64_GAME_SOFTWARE=1 keeps the game in software too. game-gpu.env is
+# rewritten whenever the launcher runs; game-gpu.local (yours, never rewritten) is read after it.
 gpu=$HOME/game-gpu.env
 if [ -f "$gpu" ] && [ "${BL_X64_GAME_SOFTWARE:-0}" != 1 ]; then
   . "$gpu"
+  [ -f "$HOME/game-gpu.local" ] && . "$HOME/game-gpu.local"
 else
   # GL threading is a GPU-path tuning from the session; with software GL under FEX it is no help.
   export mesa_glthread=false
