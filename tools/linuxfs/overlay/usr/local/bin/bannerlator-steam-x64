@@ -303,9 +303,9 @@ export STEAM_EXTRA_COMPAT_TOOLS_PATHS=
 # bwrap probe needs user namespaces - proot has none. Software rendering: no x86 GPU driver.
 export STEAM_RUNTIME=1
 [ -d "$X64_HOME/steamrt-shim" ] && export STEAM_RUNTIME_STEAMRT=$X64_HOME/steamrt-shim
-# The client wraps the processes it starts with steam-runtime-launch-client, which the SteamRT
-# container has on its PATH ("Failed to wrap process item with launch client" without it).
-[ -d "$X64_HOME/steamrt-shim/bin" ] && export PATH=$X64_HOME/steamrt-shim/bin:$PATH
+# Not steamrt-shim/bin on PATH: with steam-runtime-launch-client found, the client hands a game
+# to pressure-vessel's launcher service over the session bus, finds none and the game ends at once.
+# Without it the client logs "Failed to wrap process item with launch client" and runs it itself.
 export LD_LIBRARY_PATH=$STEAM_X64/steamrt64:$STEAM_X64/steamrt64/panorama:$X64_HOME/steamrt-libs
 # After an update the client re-executes itself inside the SteamRT container through
 # pressure-vessel-wrap, which needs bwrap. The FEX rootfs with the client's own steamrt64 libraries
