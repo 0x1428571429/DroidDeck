@@ -72,7 +72,11 @@ fi
 : > "$ROOTFS/etc/ld.so.preload"
 for lib in libblsession libfakeinput; do
   have=0
-  for arch in x86_64 i386; do
+  # The 32-bit controller reader crashes Left 4 Dead 2 (segfault right after its GL start-up): until
+  # it is fixed, 32-bit programs get only the session shim.
+  arches="x86_64 i386"; [ "$lib" = libfakeinput ] && arches=x86_64
+  rm -f "$ROOTFS/usr/local/lib/i386-linux-gnu/libfakeinput.so"
+  for arch in $arches; do
     [ -f "/usr/local/lib/$arch-linux-gnu/$lib.so" ] || continue
     mkdir -p "$ROOTFS/usr/local/lib/$arch-linux-gnu"
     cp -f "/usr/local/lib/$arch-linux-gnu/$lib.so" "$ROOTFS/usr/local/lib/$arch-linux-gnu/$lib.so"
@@ -220,6 +224,8 @@ VDF
 verb=$1; shift
 rt=$HOME/.local/share/Steam/ubuntu12_32/steam-runtime.old
 [ -x "$rt/run.sh" ] || rt=$HOME/.local/share/Steam/ubuntu12_32/steam-runtime
+# GL threading is a GPU-path tuning from the session; with software GL under FEX it is no help.
+[ -n "${LIBGL_ALWAYS_SOFTWARE:-}" ] && export mesa_glthread=false
 case $verb in
   run|waitforexitandrun) exec "$rt/run.sh" "$@" ;;
   *) exec "$@" ;;
