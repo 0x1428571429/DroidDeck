@@ -66,21 +66,22 @@ fi
 # The rootfs's own ld.so.preload: a path missing from the rootfs falls through to the guest, whose
 # list names the session's arm64 preloads. In it, the session shim built for x86-64 (System V IPC,
 # which Android kernels lack: the client's tier0 gives up on start without its semaphore).
-if [ -f /usr/local/lib/x86_64-linux-gnu/libblsession.so ]; then
-  mkdir -p "$ROOTFS/usr/local/lib"
-  cp -f /usr/local/lib/x86_64-linux-gnu/libblsession.so "$ROOTFS/usr/local/lib/libblsession-x86_64.so"
-  echo /usr/local/lib/libblsession-x86_64.so > "$ROOTFS/etc/ld.so.preload"
-  # The controller reader too: the session's pads (FAKE_EVDEV_*) exist for a program only through it.
-  if [ -f /usr/local/lib/x86_64-linux-gnu/libfakeinput.so ]; then
-    cp -f /usr/local/lib/x86_64-linux-gnu/libfakeinput.so "$ROOTFS/usr/local/lib/libfakeinput-x86_64.so"
-    echo /usr/local/lib/libfakeinput-x86_64.so >> "$ROOTFS/etc/ld.so.preload"
-  else
-    step "warning: no x86-64 controller reader (/usr/local/lib/x86_64-linux-gnu/libfakeinput.so); no pads in the client"
-  fi
-else
-  step "warning: no x86-64 session shim (/usr/local/lib/x86_64-linux-gnu/libblsession.so); the client will stop on semget"
-  : > "$ROOTFS/etc/ld.so.preload"
-fi
+# Each architecture's copy under the rootfs's own multiarch folder, named once through glibc's $LIB
+# (lib/x86_64-linux-gnu or lib/i386-linux-gnu): every process loads the one built for it, so the
+# 32-bit games get them too. A missing copy is skipped by the loader.
+: > "$ROOTFS/etc/ld.so.preload"
+for lib in libblsession libfakeinput; do
+  have=0
+  for arch in x86_64 i386; do
+    [ -f "/usr/local/lib/$arch-linux-gnu/$lib.so" ] || continue
+    mkdir -p "$ROOTFS/usr/local/lib/$arch-linux-gnu"
+    cp -f "/usr/local/lib/$arch-linux-gnu/$lib.so" "$ROOTFS/usr/local/lib/$arch-linux-gnu/$lib.so"
+    have=1
+  done
+  if [ "$have" = 1 ]; then echo "/usr/local/\$LIB/$lib.so" >> "$ROOTFS/etc/ld.so.preload"
+  else step "warning: no x86 build of $lib (/usr/local/lib/x86_64-linux-gnu/$lib.so)"; fi
+done
+rm -f "$ROOTFS/usr/local/lib/libblsession-x86_64.so" "$ROOTFS/usr/local/lib/libfakeinput-x86_64.so"
 # --- the x86-64 client -------------------------------------------------------------------------
 if [ ! -x "$STEAM_X64/steamrt64/steam" ] || [ ! -f "$STEAM_X64/package/droiddeck-installed" ]; then
   step "downloading the x86-64 Steam client ($MANIFEST)"
@@ -168,6 +169,83 @@ for f in "$srt_libs"/*; do
   n=$(basename "$f")
   if [ -e "$ROOTFS/usr/lib/x86_64-linux-gnu/$n" ] || [ -e "$ROOTFS/lib/x86_64-linux-gnu/$n" ]; then rm -f "$f"; fi
 done
+  # Native Linux games: Steam runs them in the Steam Linux Runtime container (pressure-vessel), which
+  # needs bwrap - no user namespaces here, as for the client. "DroidDeck direct" runs them with
+  # Valve's scout library runtime instead, directly under FEX; the titles below are mapped to it.
+  tool=$STEAM_X64/compatibilitytools.d/droiddeck-direct
+  mkdir -p "$tool"
+  cat > "$tool/compatibilitytool.vdf" <<'VDF'
+"compatibilitytools"
+{
+  "compat_tools"
+  {
+    "droiddeck-direct"
+    {
+      "install_path" "."
+      "display_name" "DroidDeck direct (no container)"
+      "from_oslist" "linux"
+      "to_oslist" "linux"
+    }
+  }
+}
+VDF
+  cat > "$tool/toolmanifest.vdf" <<'VDF'
+"manifest"
+{
+  "version" "2"
+  "commandline" "/run %verb%"
+}
+VDF
+  cat > "$tool/run" <<'RUN'
+#!/bin/sh
+# DroidDeck direct: a native Linux game with Valve's scout library runtime, no container.
+verb=$1; shift
+rt=$HOME/.local/share/Steam/ubuntu12_32/steam-runtime.old
+[ -x "$rt/run.sh" ] || rt=$HOME/.local/share/Steam/ubuntu12_32/steam-runtime
+case $verb in
+  run|waitforexitandrun) exec "$rt/run.sh" "$@" ;;
+  *) exec "$@" ;;
+esac
+RUN
+  chmod 755 "$tool/run"
+  # The mapping lives in config.vdf, which the client rewrites from memory as it exits: written
+  # here, while no x86 client runs.
+  if [ -f "$STEAM_X64/config/config.vdf" ] && ! pgrep -f 'steamrt64/steam( |$)' >/dev/null 2>&1; then
+    python3 - "$STEAM_X64/config/config.vdf" ${BL_X64_DIRECT_APPS:-550} <<'PY' || step "could not map titles to DroidDeck direct"
+import re, sys
+path, apps = sys.argv[1], sys.argv[2:]
+s = open(path, encoding="utf-8", errors="surrogateescape").read()
+
+def block(text, key):
+    """(start of the key, index after its opening brace, index of its closing brace) or None."""
+    m = re.search(r'"%s"\s*\{' % re.escape(key), text)
+    if not m:
+        return None
+    depth, k = 1, m.end()
+    while depth:
+        c = text[k]
+        depth += c == "{"
+        depth -= c == "}"
+        k += 1
+    return m.start(), m.end(), k - 1
+
+if not block(s, "CompatToolMapping"):
+    st = block(s, "Steam")
+    if not st:
+        sys.exit("no Steam section")
+    s = s[:st[1]] + '\n\t\t\t\t"CompatToolMapping"\n\t\t\t\t{\n\t\t\t\t}' + s[st[1]:]
+for app in apps:
+    _, open_, close = block(s, "CompatToolMapping")
+    inner = s[open_:close]
+    old = block(inner, app)
+    if old:
+        inner = inner[:old[0]] + inner[old[2] + 1:]
+    entry = ('\n\t\t\t\t\t"%s"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"droiddeck-direct"\n'
+             '\t\t\t\t\t\t"config"\t\t""\n\t\t\t\t\t\t"priority"\t\t"250"\n\t\t\t\t\t}' % app)
+    s = s[:open_] + entry + inner + s[close:]
+open(path, "w", encoding="utf-8", errors="surrogateescape").write(s)
+PY
+  fi
   # A FEX process takes its rootfs from FEXServer, not from its own environment, and a server
   # started earlier without FEX_ROOTFS (any FEX run in this guest) answers with no rootfs at all:
   # every x86 library lookup then falls through to the arm64 guest. Stop it while no x86 client
@@ -212,6 +290,9 @@ export STEAM_EXTRA_COMPAT_TOOLS_PATHS=
 # bwrap probe needs user namespaces - proot has none. Software rendering: no x86 GPU driver.
 export STEAM_RUNTIME=1
 [ -d "$X64_HOME/steamrt-shim" ] && export STEAM_RUNTIME_STEAMRT=$X64_HOME/steamrt-shim
+# The client wraps the processes it starts with steam-runtime-launch-client, which the SteamRT
+# container has on its PATH ("Failed to wrap process item with launch client" without it).
+[ -d "$X64_HOME/steamrt-shim/bin" ] && export PATH=$X64_HOME/steamrt-shim/bin:$PATH
 export LD_LIBRARY_PATH=$STEAM_X64/steamrt64:$STEAM_X64/steamrt64/panorama:$X64_HOME/steamrt-libs
 # After an update the client re-executes itself inside the SteamRT container through
 # pressure-vessel-wrap, which needs bwrap. The FEX rootfs with the client's own steamrt64 libraries

@@ -31,6 +31,8 @@ object SessionFiles {
             "libblsession.so" to "usr/local/lib/libblsession.so",
             "libblsession-x86_64.so" to "usr/local/lib/x86_64-linux-gnu/libblsession.so",
             "libfakeinput-x86_64.so" to "usr/local/lib/x86_64-linux-gnu/libfakeinput.so",
+            "libblsession-i386.so" to "usr/local/lib/i386-linux-gnu/libblsession.so",
+            "libfakeinput-i386.so" to "usr/local/lib/i386-linux-gnu/libfakeinput.so",
             "libfakeinput.so" to "usr/local/lib/libfakeinput.so",
             "libblfastpath.so" to "usr/local/lib/libblfastpath.so",
             "usr/local/bin/bannerlator-session" to "usr/local/bin/bannerlator-session",

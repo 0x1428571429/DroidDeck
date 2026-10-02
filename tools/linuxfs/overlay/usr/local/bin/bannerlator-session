@@ -679,7 +679,10 @@ BUSCONF
     # is an update that never installs: exit 42, a restart, for ever (Bannerlator 38996ea1). The
     # loop below puts package/beta back before every start. The SteamOS helpers the client calls
     # in this mode are staged as no-op stubs under /usr/bin.
-    if [ "${BL_STEAMDECK:-0}" = 1 ] && [ "${BL_STEAM_UI:-}" != desktop ]; then
+    # Not for the x86-64 client yet: with -steamos3 its SteamOS audio manager aborts on this runtime's
+    # PulseAudio 13 server (pa_operation_get_state assertion) right after start. Big Picture without
+    # the Deck flags runs.
+    if [ "${BL_STEAMDECK:-0}" = 1 ] && [ "${BL_STEAM_UI:-}" != desktop ] && [ "$steam_x64" = 0 ]; then
       _bl_ui+=(-steamdeck -steamos3)
       # The QAM's Scaling Filter lists NVIDIA Image Scaling only when told gamescope has it (it does).
       export STEAM_GAMESCOPE_NIS_SUPPORTED=1
