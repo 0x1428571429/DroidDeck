@@ -11,8 +11,8 @@
 # steamapps is the arm64 client's. Only one client runs at a time (same account), so the arm64
 # one is shut down first.
 #
-# First run downloads FEX (this repo's release), FEX's Ubuntu 24.04 x86 rootfs (~850 MB, unpacked
-# ~2.5 GB) and the x86 client (~600 MB). Log: $X64_HOME/steam-x64.log.
+# First run downloads FEX (this repo's release), FEX's Ubuntu 24.04 x86 rootfs (~525 MB, unpacked
+# ~1.5 GB) and the x86 client (~600 MB). Log: $X64_HOME/steam-x64.log.
 set -eu
 FEX_TAG=fex-2609-r1
 FEX_SHA256=bcc578c87a4d38680881e5d7564e31444467b5ce48f6dedf369536e57819afea
@@ -45,7 +45,11 @@ step "FEX: $(/usr/local/bin/FEX --version 2>&1 | head -1)"
 # --- x86 rootfs --------------------------------------------------------------------------------
 if [ ! -f "$ROOTFS/.droiddeck-complete" ]; then
   step "downloading FEX's Ubuntu 24.04 x86 rootfs"
-  curl -fL --progress-bar -C - "$ROOTFS_URL" -o "$X64_HOME/rootfs.sqsh"
+  # Resumes a part-done download; a finished one answers 416, which is not a failure here.
+  curl -fL --progress-bar -C - "$ROOTFS_URL" -o "$X64_HOME/rootfs.sqsh" || {
+    rc=$?
+    [ "$rc" = 22 ] && [ -s "$X64_HOME/rootfs.sqsh" ] || { step "rootfs download failed (curl $rc)"; exit 1; }
+  }
   step "unpacking the rootfs"
   rm -rf "$ROOTFS"
   # Ownership and xattrs mean nothing in this guest; device nodes cannot be made here and are not
