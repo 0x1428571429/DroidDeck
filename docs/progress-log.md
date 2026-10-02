@@ -7,6 +7,63 @@ the timeline, then lessons and backlog. Companion to the README (what the app *d
 
 ---
 
+## 2026-10-02 - `feat/x86-64-steam-client`: Valve's x86-64 Linux client under FEX (experiment)
+
+Why: the arm64 Linux client never runs VAC. L4D2 (and TF2 in Bannerlator) are refused by VAC
+servers ("Connection Blocked ... VAC secured server") and no client log mentions VAC; VAC modules
+are x86 code. The question is whether Valve's x86-64 client under FEX gets a VAC module it can run.
+Branched from `feat/vac-diagnostics`. Opt-in: `bannerlator-steam-x64` (desktop menu "Steam x86-64
+(FEX, experimental)") runs the client in its own home (`~/.droiddeck-x64`) with its own rootfs,
+login and library. The arm64 client stays the default and is not touched.
+
+Device-proven on the FIT (Genshin repack): **the x86-64 client runs, self-updates, renders its full
+UI (software GL), logs in, shows friends, and downloads games.** VAC itself is not tested yet.
+
+What it took, in order (each step was the next failure on device):
+- **FEX for the guest** - `tools/fex/build-in-arch.sh` + `build-fex.yml` (FEX-2609, Arch Linux ARM
+  container, no thunks), released as `fex-2609-r2` (not Latest). Rootfs: FEX's Ubuntu 24.04 image.
+- **openat2** - our proot answers it with ENOSYS; FEX opened every rootfs path with
+  `openat2(RESOLVE_IN_ROOT)`, fell through to the arm64 guest on anything but EXDEV, and x86 bash
+  could not find libtinfo. `tools/fex/patches/0001-openat2-enosys-fallback.patch`.
+- **FEXServer owns the rootfs** - a server started before `FEX_ROOTFS` (any earlier FEX run) answers
+  every client with no rootfs. The launcher stops it first.
+- **32-bit x86 died with SIGILL** - libblfastpath (the proot fast path, preloaded into every guest
+  process, FEX itself included) breaks FEX's 32-bit mode. `PROOT_FP_OFF=1` for FEX.
+- **"Steam now requires user namespaces"** - steam-runtime-check-requirements' bwrap probe; the
+  arm64 client has no such probe. The SteamRT3 client (`steamrt64/steam`) is started directly, the
+  way the session starts `steamrtarm64/steam`, with `STEAM_RUNTIME_STEAMRT` pointing at Valve's
+  runtime linked file by file and only the probe replaced.
+- **tier0 assertion "Function not implemented"** - semget: Android has no System V IPC. Traced with
+  a `-DDEBUG_STRACE` FEX (build-fex.yml `cxxflags` input, artifact only). The session shim
+  (`preload/*.c`) is now also built natively as `libblsession-x86_64.so`, staged, and preloaded
+  through the rootfs's own `/etc/ld.so.preload`.
+- **re-exec into pressure-vessel after self-update** - `STEAM_STEAMRT_RECURSION_GUARD=1`.
+- **libgtk-x11-2.0 missing / soname links / old glibc shadowing** - Valve's steamrt3c platform
+  libraries linked into `~/.droiddeck-x64/steamrt-libs`, soname links from the rootfs `ldconfig`,
+  and only libraries the rootfs lacks (LD_LIBRARY_PATH beats system folders whatever its order).
+- **GLX failed** - the desktop exports zink over the arm64 Turnip ICD; cleared, llvmpipe used.
+- **web helper died of SIGTRAP a second after start** - found with pid-tagged traces (FEX AppConfig
+  `OutputLog=server` + a foreground FEXServer, `BL_FEXSERVER_LOG`; file logs overwrite each other):
+  every web helper read `/proc/self/status` from libtier0_s.so, saw proot as a tracer, and tier0 broke
+  into the "debugger" with int3. `preload/tracer.c` exempts the web helper on purpose (Chromium traps
+  on a status fd that is not procfs); with `BL_WEBHELPER_HIDE_TRACER=1` only opens called from
+  libtier0_s.so get the copy.
+- `SessionFiles` stages `bannerlator-steam-x64` and the x86-64 shim (they were missing from the list).
+
+Dead ends worth remembering: headless VAC testing is impossible (current Steam starts the saved
+login from its UI); `-cef-*` switches are not forwarded to the x86 web helper; the KMS
+`CREATE_DUMB` errors are a red herring (40 fast ENOTTY per process); not an address-space problem
+(0 ENOMEM in 618k traced syscalls, although the device is 39-bit VA).
+
+Open:
+- VAC test: L4D2's native Linux build in the x86 client's own library (hard-linked from the arm64
+  copy, same filesystem, so only the Linux depots download). Native Linux games start inside the
+  Steam Linux Runtime container (pressure-vessel) - expected to need the same treatment.
+- No x86 GPU driver: games render with llvmpipe. Playable needs FEX host thunks.
+- Windows games in the x86 client need x86 Proton = pressure-vessel.
+- Controllers in the x86 client (libfakeinput is arm64 only).
+- One client per account: integration would be a per-title hand-off, not side by side.
+
 ## 2026-09-29 - `feat/controller-input`: the pad the way SteamOS has it
 
 Device-tested on the AYN Thor (Katamari under Proton Experimental ARM64).
