@@ -1,0 +1,109 @@
+#!/bin/bash
+# EXPERIMENT, opt-in: Valve's x86-64 Linux Steam client under FEX, beside the default arm64 one.
+#   bannerlator-steam-x64 [steam:// URL or client arguments]
+#
+# Why: the arm64 Linux client never runs VAC (TF2, L4D2: "Connection Blocked ... VAC secured
+# server", no VAC line in any client log) - VAC modules are x86 code. The x86-64 client under FEX
+# has a module it can run, the way SteamLite does in Wine. This runs Valve's client unchanged.
+#
+# Everything lives in its own home ($X64_HOME): the x86 client gets its own ~/.steam links, its
+# own login and its own config, and never touches the arm64 client's. Games are shared: its
+# steamapps is the arm64 client's. Only one client runs at a time (same account), so the arm64
+# one is shut down first.
+#
+# First run downloads FEX (this repo's release), FEX's Ubuntu 24.04 x86 rootfs (~850 MB, unpacked
+# ~2.5 GB) and the x86 client (~600 MB). Log: $X64_HOME/steam-x64.log.
+set -eu
+FEX_TAG=fex-2609-r1
+FEX_SHA256=bcc578c87a4d38680881e5d7564e31444467b5ce48f6dedf369536e57819afea
+FEX_URL=https://github.com/Droid-Deck/DroidDeck/releases/download/$FEX_TAG/fex.tzst
+ROOTFS_URL=https://rootfs.fex-emu.gg/Ubuntu_24_04/2026-08-11/Ubuntu_24_04.sqsh
+CDN=https://client-update.fastly.steamstatic.com
+MANIFEST=steam_client_publicbeta_ubuntu12
+
+REAL_HOME=${HOME:-/root}
+X64_HOME=${BL_X64_HOME:-$REAL_HOME/.droiddeck-x64}
+ROOTFS=$X64_HOME/rootfs
+STEAM_X64=$X64_HOME/.local/share/Steam
+ARM_STEAM=${XDG_DATA_HOME:-$REAL_HOME/.local/share}/Steam
+LOG=$X64_HOME/steam-x64.log
+mkdir -p "$X64_HOME"
+step() { echo "== $(date -u +%H:%M:%S) $*" | tee -a "$LOG"; }
+
+# --- FEX -------------------------------------------------------------------------------------
+if [ ! -x /usr/local/bin/FEX ] || [ "$(cat /usr/local/share/fex-emu/.droiddeck-tag 2>/dev/null)" != "$FEX_TAG" ]; then
+  step "downloading FEX ($FEX_TAG)"
+  tmp=$(mktemp -d)
+  curl -fL --progress-bar "$FEX_URL" -o "$tmp/fex.tzst"
+  if [ "$FEX_SHA256" != PENDING ]; then echo "$FEX_SHA256  $tmp/fex.tzst" | sha256sum -c --quiet; fi
+  zstd -dc "$tmp/fex.tzst" | tar -C / -x
+  rm -rf "$tmp"
+  mkdir -p /usr/local/share/fex-emu && echo "$FEX_TAG" > /usr/local/share/fex-emu/.droiddeck-tag
+fi
+step "FEX: $(/usr/local/bin/FEX --version 2>&1 | head -1)"
+
+# --- x86 rootfs --------------------------------------------------------------------------------
+if [ ! -f "$ROOTFS/.droiddeck-complete" ]; then
+  step "downloading FEX's Ubuntu 24.04 x86 rootfs"
+  curl -fL --progress-bar -C - "$ROOTFS_URL" -o "$X64_HOME/rootfs.sqsh"
+  step "unpacking the rootfs"
+  rm -rf "$ROOTFS"
+  # Ownership and xattrs mean nothing in this guest; device nodes cannot be made here and are not
+  # needed (FEX passes /dev through from the host).
+  /usr/local/bin/unsquashfs -no-xattrs -no-progress -ignore-errors -d "$ROOTFS" "$X64_HOME/rootfs.sqsh" >>"$LOG" 2>&1 || true
+  [ -x "$ROOTFS/usr/bin/bash" ] || { step "rootfs unpack failed (no usr/bin/bash); see $LOG"; exit 1; }
+  rm -f "$X64_HOME/rootfs.sqsh"
+  touch "$ROOTFS/.droiddeck-complete"
+fi
+
+# --- the x86-64 client -------------------------------------------------------------------------
+if [ ! -x "$STEAM_X64/steamrt64/steam" ] || [ ! -f "$STEAM_X64/package/droiddeck-installed" ]; then
+  step "downloading the x86-64 Steam client ($MANIFEST)"
+  work=$(mktemp -d)
+  curl -fsSL "$CDN/$MANIFEST" -o "$work/manifest"
+  version=$(awk -F'"' '$2 == "version" { print $4; exit }' "$work/manifest")
+  # Same parsing as bannerlator-steam-install: every component block's plain zip and sha256.
+  awk -F'"' '
+    /^\t"/ && NF >= 3 && $4 == "" { block = $2 }
+    $2 == "file" { file[block] = $4 }
+    $2 == "sha2" { sha[block] = $4 }
+    END { for (b in file) if (b ~ /_all$/ || b ~ /_ubuntu12$/) print b, file[b], sha[b] }
+  ' "$work/manifest" | sort > "$work/parts"
+  [ -s "$work/parts" ] || { step "no client components in $MANIFEST"; exit 1; }
+  mkdir -p "$STEAM_X64/package"
+  total=$(grep -c . "$work/parts")
+  i=0
+  while read -r block file sum; do
+    i=$((i + 1))
+    step "client: $block ($i/$total)"
+    curl -fsSL "$CDN/$file" -o "$work/$file"
+    echo "$sum  $work/$file" | sha256sum -c --quiet
+    unzip -qo "$work/$file" -d "$STEAM_X64"
+    rm -f "$work/$file"
+  done < "$work/parts"
+  rm -rf "$work"
+  echo publicbeta > "$STEAM_X64/package/beta"
+  echo "$version" > "$STEAM_X64/package/droiddeck-installed"
+  chmod +x "$STEAM_X64/steam.sh" "$STEAM_X64/steamrt64/steam" "$STEAM_X64/ubuntu12_32/steam" 2>/dev/null || true
+fi
+# Shared games: the arm64 client's library, as long as it is not running at the same time.
+if [ -d "$ARM_STEAM/steamapps" ] && [ ! -e "$STEAM_X64/steamapps" ]; then
+  ln -s "$ARM_STEAM/steamapps" "$STEAM_X64/steamapps"
+fi
+
+# --- one client at a time ----------------------------------------------------------------------
+if pgrep -f 'steamrtarm64/steam( |$)' >/dev/null 2>&1; then
+  step "shutting down the arm64 client first"
+  "$ARM_STEAM/steamrtarm64/steam" -shutdown >/dev/null 2>&1 || true
+  for _ in $(seq 1 30); do pgrep -f 'steamrtarm64/steam( |$)' >/dev/null 2>&1 || break; sleep 1; done
+fi
+
+# --- run ---------------------------------------------------------------------------------------
+# The arm64 session's library paths and preloads are aarch64 and mean nothing to x86 processes.
+unset LD_LIBRARY_PATH LD_PRELOAD STEAM_RUNTIME STEAM_RUNTIME_PREFER_HOST_LIBRARIES
+export HOME=$X64_HOME
+export FEX_ROOTFS=$ROOTFS
+export STEAM_EXTRA_COMPAT_TOOLS_PATHS=
+step "starting the x86-64 client under FEX: steam.sh -no-cef-sandbox $*"
+cd "$STEAM_X64"
+exec /usr/local/bin/FEX "$ROOTFS/usr/bin/bash" "$STEAM_X64/steam.sh" -no-cef-sandbox "$@" >>"$LOG" 2>&1
