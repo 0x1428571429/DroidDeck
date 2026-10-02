@@ -115,10 +115,6 @@ unset LD_LIBRARY_PATH LD_PRELOAD STEAM_RUNTIME STEAM_RUNTIME_PREFER_HOST_LIBRARI
 # Steam's 32-bit check reports libc.so.6 missing. 64-bit runs either way; proot then answers
 # FEX's path calls itself.
 export PROOT_FP_OFF=1
-# Valve's 64-bit SteamRT3 client (steamrt64/steam), the x86 twin of the arm64 one; steam.sh
-# starts it directly on the beta branch. The legacy ubuntu12_32 path first runs
-# steam-runtime-check-requirements, which refuses without user namespaces - proot has none.
-export STEAM_FORCE_CLIENT=steamrt64
 export HOME=$X64_HOME
 export FEX_ROOTFS=$ROOTFS
 # A FEX process takes its rootfs from FEXServer, not from its own environment, and a server
@@ -127,6 +123,21 @@ export FEX_ROOTFS=$ROOTFS
 # starts one with this rootfs.
 /usr/local/bin/FEXServer -k >/dev/null 2>&1 || true
 export STEAM_EXTRA_COMPAT_TOOLS_PATHS=
-step "starting the x86-64 client under FEX: steam.sh -no-cef-sandbox $*"
+# What steam.sh sets up before it runs the client, for the x86 tree.
+mkdir -p "$X64_HOME/.steam"
+ln -sfn "$STEAM_X64" "$X64_HOME/.steam/root"
+ln -sfn "$STEAM_X64" "$X64_HOME/.steam/steam"
+ln -sfn "$STEAM_X64/ubuntu12_32" "$X64_HOME/.steam/bin32"
+ln -sfn "$STEAM_X64/ubuntu12_64" "$X64_HOME/.steam/bin64"
+ln -sfn "$STEAM_X64/linux32" "$X64_HOME/.steam/sdk32"
+ln -sfn "$STEAM_X64/linux64" "$X64_HOME/.steam/sdk64"
+# Valve's 64-bit SteamRT3 client (steamrt64/steam), the x86 twin of the arm64 one, started the way
+# the session starts that one (bannerlator-session): directly, STEAM_RUNTIME=1, its own library
+# folders first. Through steam.sh it would first run steam-runtime-check-requirements, whose
+# bwrap probe needs user namespaces - proot has none. Software rendering: no x86 GPU driver.
+export STEAM_RUNTIME=1
+export LD_LIBRARY_PATH=$STEAM_X64/steamrt64:$STEAM_X64/steamrt64/panorama
+step "starting the x86-64 SteamRT3 client under FEX: $*"
 cd "$STEAM_X64"
-exec /usr/local/bin/FEX "$ROOTFS/usr/bin/bash" "$STEAM_X64/steam.sh" -no-cef-sandbox "$@" >>"$LOG" 2>&1
+exec /usr/local/bin/FEX "$STEAM_X64/steamrt64/steam" -clientbeta publicbeta -no-cef-sandbox \
+  -cef-ozone-platform=x11 -cef-disable-gpu "$@" >>"$LOG" 2>&1
