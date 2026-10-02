@@ -50,6 +50,13 @@ rm -rf fex-src out && git clone -q --depth 1 --branch "$VERSION" --recurse-submo
 # Our proot answers openat2 with ENOSYS (tools/proot/PATCHES.md, 0008); FEX opened every rootfs
 # path with openat2 and fell through to the arm64 guest's files on anything but EXDEV.
 for p in tools/fex/patches/*.patch; do patch -d fex-src -p1 --no-backup-if-mismatch < "$p"; done
+# FEX's x86 toolchain files assume an x86 build machine: on this arm64 one the guest thunks need the
+# x86 sysroot for their headers, C runtime objects and libgcc too, not just the generator.
+if [ "$THUNKS" = 1 ]; then
+  for t in fex-src/Data/CMake/toolchain_x86_64.cmake fex-src/Data/CMake/toolchain_x86_32.cmake; do
+    printf '\nif (X86_DEV_ROOTFS AND NOT X86_DEV_ROOTFS STREQUAL "/")\n  set(CMAKE_SYSROOT "${X86_DEV_ROOTFS}")\nendif()\n' >> "$t"
+  done
+fi
 # TUNE_CPU none: the default (native) would tune for the runner's Neoverse cores, not the device.
 cmake -S fex-src -B fex-build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
