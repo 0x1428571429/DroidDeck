@@ -38,6 +38,16 @@ static void handler(int sig, siginfo_t *si, void *ctx) {
   snprintf(buf, sizeof buf, "=== pid %d signal %d code %d fault addr %p\n", getpid(), sig, si->si_code, si->si_addr);
   if (out >= 0) write(out, buf, strlen(buf));
   line("pc", pc);
+  // Leaf functions (strlen, memcpy) keep no frame: the caller's return address is on the stack.
+#if defined(__i386__)
+  void **sp = (void **)uc->uc_mcontext.gregs[REG_ESP];
+#else
+  void **sp = (void **)uc->uc_mcontext.gregs[REG_RSP];
+#endif
+  for (int i = 0; i < 48 && sp; i++) {
+    Dl_info di;
+    if (sp[i] && dladdr(sp[i], &di) && di.dli_fname) line("  sp", sp[i]);
+  }
   for (int i = 0; i < 24 && fp && ((unsigned long)fp & 3) == 0; i++) {
     void *ret = fp[1];
     if (!ret) break;
