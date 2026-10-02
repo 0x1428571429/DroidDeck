@@ -208,11 +208,12 @@ cd "$STEAM_X64"
 # over DRI3 even with the GPU off, loops on KMS dumb-buffer ioctls against the KGSL device and never
 # brings a browser up (the client restarts it every 10 s). On Wayland without a GPU it draws to
 # shared-memory buffers.
+# BL_FEX: another FEX build for the client and everything it starts (a DEBUG_STRACE one, say).
 # Restart on request (42, as steam.sh does), at most a few times.
 for attempt in 1 2 3 4 5; do
   step "starting the x86-64 SteamRT3 client under FEX (attempt $attempt): $*"
   rc=0
-  /usr/local/bin/FEX "$STEAM_X64/steamrt64/steam" -clientbeta publicbeta -no-cef-sandbox \
+  "${BL_FEX:-/usr/local/bin/FEX}" "$STEAM_X64/steamrt64/steam" -clientbeta publicbeta -no-cef-sandbox \
     -cef-ozone-platform=wayland -cef-disable-gpu "$@" >>"$LOG" 2>&1 || rc=$?
   step "client exited rc=$rc"
   [ "$rc" = 42 ] || break
