@@ -40,7 +40,7 @@ if [ ! -x /usr/local/bin/FEX ] || [ "$(cat /usr/local/share/fex-emu/.droiddeck-t
   rm -rf "$tmp"
   mkdir -p /usr/local/share/fex-emu && echo "$FEX_TAG" > /usr/local/share/fex-emu/.droiddeck-tag
 fi
-step "FEX: $(/usr/local/bin/FEX --version 2>&1 | head -1)"
+step "FEX ready ($FEX_TAG)"
 
 # --- x86 rootfs --------------------------------------------------------------------------------
 if [ ! -f "$ROOTFS/.droiddeck-complete" ]; then
@@ -107,6 +107,11 @@ fi
 unset LD_LIBRARY_PATH LD_PRELOAD STEAM_RUNTIME STEAM_RUNTIME_PREFER_HOST_LIBRARIES
 export HOME=$X64_HOME
 export FEX_ROOTFS=$ROOTFS
+# A FEX process takes its rootfs from FEXServer, not from its own environment, and a server
+# started earlier without FEX_ROOTFS (any FEX run in this guest) answers with no rootfs at all:
+# every x86 library lookup then falls through to the arm64 guest. Stop it, so the next FEX
+# starts one with this rootfs.
+/usr/local/bin/FEXServer -k >/dev/null 2>&1 || true
 export STEAM_EXTRA_COMPAT_TOOLS_PATHS=
 step "starting the x86-64 client under FEX: steam.sh -no-cef-sandbox $*"
 cd "$STEAM_X64"
