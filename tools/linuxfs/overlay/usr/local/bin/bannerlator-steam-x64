@@ -168,10 +168,18 @@ fi
 export LD_LIBRARY_PATH=$STEAM_X64/steamrt64:$STEAM_X64/steamrt64/panorama
 # The libraries the SteamRT container would give the client and the rootfs lacks (GTK 2 for
 # steamui.so, ...): Valve's own platform runtime files, last, so the rootfs's copies come first.
+# They ship without their soname links (pressure-vessel makes those when it builds the container),
+# so they are linked into a folder of our own and the rootfs's ldconfig adds the soname links there.
+srt_libs=$X64_HOME/steamrt-libs
+rm -rf "$srt_libs"
+mkdir -p "$srt_libs"
 for d in "$STEAM_X64"/steamrt64/pv-runtime/steam-runtime-steamrt/steamrt3c_platform_*/files/lib/x86_64-linux-gnu \
          "$STEAM_X64"/steamrt64/pv-runtime/steam-runtime-steamrt/steamrt3c_platform_*/files/usr/lib/x86_64-linux-gnu; do
-  [ -d "$d" ] && LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$d
+  [ -d "$d" ] || continue
+  for f in "$d"/*.so*; do [ -e "$srt_libs/$(basename "$f")" ] || ln -s "$f" "$srt_libs/"; done
 done
+/usr/local/bin/FEX "$ROOTFS/usr/sbin/ldconfig.real" -n "$srt_libs" >>"$LOG" 2>&1 || step "ldconfig on $srt_libs failed"
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$srt_libs
 # After an update the client re-executes itself inside the SteamRT container through
 # pressure-vessel-wrap, which needs bwrap. The FEX rootfs with the client's own steamrt64 libraries
 # is that container here; the client's recursion guard says it is already inside one.
