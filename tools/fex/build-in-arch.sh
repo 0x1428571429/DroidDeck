@@ -24,7 +24,7 @@ X86ROOT=$WORK/x86root
 if [ "$THUNKS" = 1 ]; then
   pacman -S --noconfirm --needed pkgconf libx11 libxcb libxrandr libxrender libxext xorgproto \
     libglvnd mesa wayland libdrm alsa-lib libxshmfence vulkan-headers vulkan-icd-loader
-  rm -rf "$X86ROOT" && mkdir -p "$X86ROOT/var/lib/pacman"
+  rm -rf "$X86ROOT" && mkdir -p "$X86ROOT/var/lib/pacman" "$WORK/x86-cache"
   cat > "$WORK/x86-pacman.conf" <<'CONF'
 [options]
 Architecture = x86_64
