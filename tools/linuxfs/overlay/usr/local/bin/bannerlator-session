@@ -747,6 +747,16 @@ BUSCONF
       rm -f "$BL_LAUNCH_DIR/steam-stop"
       (
         while :; do
+          # A steam:// URL left in $BL_LAUNCH_DIR/steam-url is handed to the running client (the
+          # client binary started with a URL passes it on and exits): how a game is started, or
+          # anything else the client takes a URL for, without touching the screen.
+          if [ -s "$BL_LAUNCH_DIR/steam-url" ]; then
+            _bl_req=$(head -n 1 "$BL_LAUNCH_DIR/steam-url")
+            rm -f "$BL_LAUNCH_DIR/steam-url"
+            case $_bl_req in
+              steam://*) echo "== steam: handing the client $_bl_req"; "${steam_client[@]}" "$_bl_req" >/dev/null 2>&1 & ;;
+            esac
+          fi
           if [ -e "$BL_LAUNCH_DIR/steam-stop" ]; then
             rm -f "$BL_LAUNCH_DIR/steam-stop"
             : > "$HOME/.bl-stop-requested"
