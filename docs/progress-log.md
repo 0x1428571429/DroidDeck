@@ -68,6 +68,28 @@ Later the same day (device-proven unless noted):
   skipped.
 - L4D2 hard-link reuse does not work: switching platform makes Steam redownload depot 551 anyway.
 
+Evening (device-proven unless noted):
+- **Play button with the x86-64 client works** (Steam settings > Client > Steam client: x86-64).
+  Deck mode is skipped for it: with -steamos3 its SteamOS audio manager aborts on the runtime's
+  PulseAudio 13 (pa_operation_get_state assertion).
+- **Left 4 Dead 2 runs in the x86-64 client and joined a live online game** (Quick Match, Swamp
+  Fever, other players, 138 ms) - the server type that refused the arm64 client with "Connection
+  Blocked ... VAC secured server". Not yet hard proof of VAC (no client log line; -condebug added
+  for the server's secure flag). Software rendering: ~11 fps.
+- What the launch needed: "DroidDeck direct", a compatibility tool running native Linux games with
+  Valve's scout library runtime instead of the Steam Linux Runtime container; a stand-in
+  steam-runtime-launch-client (the client, believing itself inside the SteamRT container, starts
+  every game "alongside Steam" through it, and Valve's needs a launcher service on a session bus);
+  i386 builds of the session shim (the i386 controller reader crashes the game and is left out for
+  now). A steam:// URL written to the launch dir now reaches the running client.
+- **FEX with host thunks** (fex-2609-r3): FEX's Vulkan/GL/EGL/DRM/Wayland/ALSA thunks, 64- and
+  32-bit guests, guest halves cross-compiled against an Arch x86_64/multilib sysroot. The x86 client
+  uses them when installed (GPU mode, the arm64 client's ANGLE-on-Vulkan flags) - built, not yet
+  device-tested.
+- The proot fast path now stands down in FEX only for 32-bit programs (it broke FEX's 32-bit mode).
+- The Linux FEX as a component file: /sdcard/Download/FEX-2609-r2-x86-64-guest.wcp (type
+  FEX-Guest); the Components section does not know that type yet.
+
 Open:
 - VAC test: L4D2's native Linux build in the x86 client's own library (hard-linked from the arm64
   copy, same filesystem, so only the Linux depots download). Native Linux games start inside the
