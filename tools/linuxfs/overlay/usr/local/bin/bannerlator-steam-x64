@@ -141,6 +141,12 @@ export LIBGL_DRI3_DISABLE=1
 # Steam's 32-bit check reports libc.so.6 missing. 64-bit runs either way; proot then answers
 # FEX's path calls itself.
 export PROOT_FP_OFF=1
+# FEX tuning: the app's default preset for games (core/FexPreset.kt PERFORMANCE_TSO, WinNative's
+# default) - FEX's own defaults keep half-barrier TSO and full-precision x87, which cost every x86
+# program time. A value already in the environment wins.
+export FEX_TSOENABLED=${FEX_TSOENABLED:-1} FEX_VECTORTSOENABLED=${FEX_VECTORTSOENABLED:-0} \
+  FEX_MEMCPYSETTSOENABLED=${FEX_MEMCPYSETTSOENABLED:-0} FEX_HALFBARRIERTSOENABLED=${FEX_HALFBARRIERTSOENABLED:-0} \
+  FEX_X87REDUCEDPRECISION=${FEX_X87REDUCEDPRECISION:-1} FEX_MULTIBLOCK=${FEX_MULTIBLOCK:-1}
 export HOME=$X64_HOME
 export FEX_ROOTFS=$ROOTFS
 # A FEX process takes its rootfs from FEXServer, not from its own environment, and a server
