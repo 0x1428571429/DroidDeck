@@ -24,7 +24,8 @@ cmake -S fex-src -B fex-build -G Ninja \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DUSE_LINKER=lld \
   -DTUNE_CPU=none -DTUNE_ARCH=armv8-a \
   -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF -DENABLE_ASSERTIONS=OFF \
-  -DENABLE_CCACHE=OFF -DENABLE_OFFLINE_TELEMETRY=OFF
+  -DENABLE_CCACHE=OFF -DENABLE_OFFLINE_TELEMETRY=OFF \
+  ${FEX_EXTRA_CXXFLAGS:+-DCMAKE_CXX_FLAGS="$FEX_EXTRA_CXXFLAGS"}
 ninja -C fex-build
 DESTDIR="$WORK/out" ninja -C fex-build install
 install -Dm755 /usr/bin/unsquashfs out/usr/local/bin/unsquashfs

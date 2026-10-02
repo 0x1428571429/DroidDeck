@@ -14,6 +14,10 @@ on:
         description: 'Release tag to publish as (e.g. fex-2609-r1); empty = artifact only'
         required: false
         default: ''
+      cxxflags:
+        description: 'Extra CXXFLAGS for a diagnostic build (e.g. -DDEBUG_STRACE); never published with a tag'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -27,7 +31,7 @@ jobs:
       - name: Build in Arch Linux ARM
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD:/work" -w /work menci/archlinuxarm:base-devel bash tools/fex/build-in-arch.sh
+          docker run --rm -e FEX_EXTRA_CXXFLAGS="${{ inputs.cxxflags }}" -v "$PWD:/work" -w /work menci/archlinuxarm:base-devel bash tools/fex/build-in-arch.sh
           sudo chown -R "$(id -u):$(id -g)" .
       - uses: actions/upload-artifact@v4
         with:
@@ -38,7 +42,7 @@ jobs:
             fex-needed.txt
             fex-files.txt
       - name: Publish
-        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != '' && inputs.cxxflags == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
