@@ -498,6 +498,31 @@ case $mode in
         done
         return 1
       }
+      # A title the compat pass maps while the client runs only takes that mapping at the client's
+      # next start (see bannerlator-steam-compat): until then the client launches it its own way -
+      # a Linux build stuck on "Downloading content (0%)" for a Steam Linux Runtime and FEX that
+      # cannot run here (Left 4 Dead 2, 2026-10-02). So restart the client once for it, through the
+      # same marker and -shutdown as the ARM64 Proton's restart: only when every new title has
+      # finished installing (StateFlags 4) and no game is running; another download just resumes.
+      # Once per title and three times per session at most, so a client that rewrites config.vdf
+      # can never loop it.
+      compat_pending=$HOME/.bl-compat-pending
+      compat_restarted=$HOME/.bl-compat-restarted
+      rm -f "$compat_pending"
+      : > "$compat_restarted"
+      compat_restarts=0
+      compat_settled() {
+        local app m flags
+        while read -r app; do
+          [ -n "$app" ] || continue
+          m="$steam_root/steamapps/appmanifest_$app.acf"
+          [ -f "$m" ] || m="/mnt/droiddeck-sd/steamapps/appmanifest_$app.acf"
+          [ -f "$m" ] || return 1
+          flags=$(sed -n 's/^[[:space:]]*"StateFlags"[[:space:]]*"\([0-9]*\)".*/\1/p' "$m" | head -n 1)
+          [ "$flags" = 4 ] || return 1
+        done < "$compat_pending"
+        ! pgrep -f 'reaper SteamLaunch' >/dev/null 2>&1
+      }
       for ((_i = 0; _i < 720; _i++)); do
         nap 5
         beat=$((beat + 1))
@@ -505,7 +530,17 @@ case $mode in
         bannerlator-seed-redists "$steam_root" >/dev/null 2>&1 || true
         if compat_due; then
           : > "$compat_stamp"
-          bannerlator-steam-compat "$steam_root" >/dev/null 2>&1 || true
+          bannerlator-steam-compat "$steam_root" --live >/dev/null 2>&1 || true
+        fi
+        if [ -s "$compat_pending" ] && compat_settled; then
+          _bl_new=$(sort -u "$compat_pending" | grep -vxF -f "$compat_restarted" || true)
+          rm -f "$compat_pending"
+          [ -n "$_bl_new" ] && [ "$compat_restarts" -lt 3 ] || continue
+          compat_restarts=$((compat_restarts + 1))
+          printf '%s\n' $_bl_new >> "$compat_restarted"
+          step "newly installed title(s) $(echo $_bl_new) set to the ARM64 Proton: restarting the Steam client once so it takes effect"
+          : > "$HOME/.bl-restart-once"
+          "$steam_root/steamrtarm64/steam" -shutdown >/dev/null 2>&1 || true
         fi
       done
     ) &
@@ -719,6 +754,9 @@ BUSCONF
       # arguments, which were acted on. Not counted against the update cap.
       if [ -f "$HOME/.bl-restart-once" ]; then
         echo "== steam: restarting once so the new compatibility layer is in the client's lists"
+        # The client wrote config.vdf back from its own memory as it exited, which can drop the
+        # per-title entries written while it ran - the very ones this restart is for.
+        bannerlator-steam-compat "$steam_root" >/dev/null 2>&1 || true
         set --
         continue
       fi

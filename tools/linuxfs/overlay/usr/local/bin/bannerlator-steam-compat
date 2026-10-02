@@ -579,7 +579,8 @@ def installed_apps(steam_root):
 
 
 def register_default(config_path, apps=(), name=None, protect=()):
-    """Writes the mapping. `name` defaults to our own tool; the first-run seed passes Valve's."""
+    """Writes the mapping. `name` defaults to our own tool; the first-run seed passes Valve's.
+    Returns the app ids given a per-app entry by this call."""
     tool = name or TOOL
     # Tool names the user may deliberately have chosen (see adopt_extras); never repointed.
     keep = {n.lower() for n in protect}
@@ -588,7 +589,8 @@ def register_default(config_path, apps=(), name=None, protect=()):
     tokens = tokenize(original)
     steam = find_block(tokens, ["InstallConfigStore", "Software", "Valve", "Steam"])
     if steam is None:
-        return
+        return []
+    added = []
     mapping = find_block(tokens[steam + 1:], ["CompatToolMapping"])
     entry = ['"0"', "{", '"name"', '"%s"' % tool, '"config"', '""', '"priority"', '"75"', "}"]
     if mapping is None:
@@ -612,10 +614,12 @@ def register_default(config_path, apps=(), name=None, protect=()):
                 continue
             tokens[mapping + 1:mapping + 1] = [
                 '"%s"' % app, "{", '"name"', '"%s"' % tool, '"config"', '""', '"priority"', '"250"', "}"]
+            added.append(app)
     # Nothing to change is the usual case on the session's beat: the client's own file is left alone.
     text = serialize(tokens)
     if text != serialize(tokenize(original)):
         write_changed(config_path, text)
+    return added
 
 
 def depot_build(depot):
@@ -666,8 +670,18 @@ def main():
     config = os.path.join(steam_root, "config", "config.vdf")
     if os.path.isfile(config):
         apps = installed_apps(steam_root)
-        register_default(config, apps, protect=extras)
+        added = register_default(config, apps, protect=extras)
         print("bannerlator-steam-compat: default and %d installed title(s) set to %s" % (len(apps), TOOL))
+        # The client reads config.vdf once, as it starts, and keeps its own decisions in memory for
+        # the rest of its run: a title installed while it runs gets the client's own pick (native
+        # for a Linux build, which then waits for Steam Linux Runtime + FEX it can never run here;
+        # proton-stable for a Windows one), and the entry written here only counts from the next
+        # start. Run from the session's beat (--live), the new entries are noted for the session,
+        # which restarts the client once the install has settled (bannerlator-session).
+        if added and "--live" in sys.argv[2:]:
+            with open(os.path.join(os.path.expanduser("~"), ".bl-compat-pending"), "a") as f:
+                f.write("".join("%s\n" % a for a in added))
+            print("bannerlator-steam-compat: mapped while the client runs: %s" % " ".join(added))
 
 
 if __name__ == "__main__":
