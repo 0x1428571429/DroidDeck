@@ -166,7 +166,18 @@ exit 0
   export STEAM_RUNTIME_STEAMRT=$srt_shim
 fi
 export LD_LIBRARY_PATH=$STEAM_X64/steamrt64:$STEAM_X64/steamrt64/panorama
-step "starting the x86-64 SteamRT3 client under FEX: $*"
+# After an update the client re-executes itself inside the SteamRT container through
+# pressure-vessel-wrap, which needs bwrap. The FEX rootfs with the client's own steamrt64 libraries
+# is that container here; the client's recursion guard says it is already inside one.
+export STEAM_STEAMRT_RECURSION_GUARD=1
 cd "$STEAM_X64"
-exec /usr/local/bin/FEX "$STEAM_X64/steamrt64/steam" -clientbeta publicbeta -no-cef-sandbox \
-  -cef-ozone-platform=x11 -cef-disable-gpu "$@" >>"$LOG" 2>&1
+# Restart on request (42, as steam.sh does), at most a few times.
+for attempt in 1 2 3 4 5; do
+  step "starting the x86-64 SteamRT3 client under FEX (attempt $attempt): $*"
+  rc=0
+  /usr/local/bin/FEX "$STEAM_X64/steamrt64/steam" -clientbeta publicbeta -no-cef-sandbox \
+    -cef-ozone-platform=x11 -cef-disable-gpu "$@" >>"$LOG" 2>&1 || rc=$?
+  step "client exited rc=$rc"
+  [ "$rc" = 42 ] || break
+done
+exit "$rc"
