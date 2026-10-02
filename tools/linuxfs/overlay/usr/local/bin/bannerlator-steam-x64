@@ -136,6 +136,29 @@ ln -sfn "$STEAM_X64/linux64" "$X64_HOME/.steam/sdk64"
 # folders first. Through steam.sh it would first run steam-runtime-check-requirements, whose
 # bwrap probe needs user namespaces - proot has none. Software rendering: no x86 GPU driver.
 export STEAM_RUNTIME=1
+# Unlike the arm64 client, this one carries pressure-vessel (steamrt64/pv-runtime) and refuses to
+# start when steam-runtime-check-requirements' bwrap probe cannot make a user namespace, which no
+# Android app can. proot is the container here, as it is for the arm64 client, which has no such
+# probe. STEAM_RUNTIME_STEAMRT names the runtime the client takes the probe from: Valve's own,
+# linked file by file, with only the probe answering that the requirements are met.
+srt_real=$STEAM_X64/steamrt64/pv-runtime/steam-runtime-steamrt
+srt_shim=$X64_HOME/steamrt-shim
+if [ -d "$srt_real" ]; then
+  rm -rf "$srt_shim"
+  mkdir -p "$srt_shim/bin"
+  for e in "$srt_real"/* "$srt_real"/.[!.]*; do
+    [ -e "$e" ] || continue
+    [ "$(basename "$e")" = bin ] || ln -s "$e" "$srt_shim/$(basename "$e")"
+  done
+  for e in "$srt_real"/bin/*; do ln -s "$e" "$srt_shim/bin/$(basename "$e")"; done
+  rm -f "$srt_shim/bin/steam-runtime-check-requirements"
+  printf '#!/bin/sh
+# bannerlator-steam-x64: proot stands in for user namespaces here.
+exit 0
+' > "$srt_shim/bin/steam-runtime-check-requirements"
+  chmod 755 "$srt_shim/bin/steam-runtime-check-requirements"
+  export STEAM_RUNTIME_STEAMRT=$srt_shim
+fi
 export LD_LIBRARY_PATH=$STEAM_X64/steamrt64:$STEAM_X64/steamrt64/panorama
 step "starting the x86-64 SteamRT3 client under FEX: $*"
 cd "$STEAM_X64"
