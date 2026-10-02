@@ -126,6 +126,9 @@ export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 # "failed to query kernel driver version", KMS dumb-buffer ioctls in a loop) - the webhelper never
 # got a browser up. FEX looks in the rootfs first: an empty /dev/dri there hides the node.
 mkdir -p "$ROOTFS/dev/dri"
+# The X server hands out that node too (DRI3 open), and Mesa's software path then tries KMS dumb
+# buffers on it in a loop: present through plain X instead.
+export LIBGL_DRI3_DISABLE=1
 # The proot fast path (libblfastpath, preloaded into every guest process, FEX included) breaks
 # FEX's 32-bit mode: every i386 program dies with SIGILL at start (FEX's own fatal trap), so
 # Steam's 32-bit check reports libc.so.6 missing. 64-bit runs either way; proot then answers
