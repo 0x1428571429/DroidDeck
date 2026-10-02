@@ -149,6 +149,24 @@ if [ -d "$srt_real" ]; then
 exit 0
 ' > "$srt_shim/bin/steam-runtime-check-requirements"
   chmod 755 "$srt_shim/bin/steam-runtime-check-requirements"
+  # steam-runtime-launch-client --alongside-steam [options] -- COMMAND: no container to leave here.
+  rm -f "$srt_shim/bin/steam-runtime-launch-client"
+  cat > "$srt_shim/bin/steam-runtime-launch-client" <<'LAUNCH'
+#!/bin/sh
+# bannerlator-steam-x64: no SteamRT container here, so "alongside Steam" is right here - run it.
+while [ $# -gt 0 ]; do
+  case $1 in
+    --) shift; break ;;
+    --directory=*) cd "${1#--directory=}" || exit 127 ;;
+    --env=*) export "${1#--env=}" ;;
+    --unset-env=*) unset "${1#--unset-env=}" ;;
+  esac
+  shift
+done
+[ $# -gt 0 ] || exit 0
+exec "$@"
+LAUNCH
+  chmod 755 "$srt_shim/bin/steam-runtime-launch-client"
 fi
 # The libraries the SteamRT container would give the client and the rootfs lacks (GTK 2 for
 # steamui.so, ...): Valve's own platform runtime files, for what the rootfs does not have.
@@ -303,9 +321,11 @@ export STEAM_EXTRA_COMPAT_TOOLS_PATHS=
 # bwrap probe needs user namespaces - proot has none. Software rendering: no x86 GPU driver.
 export STEAM_RUNTIME=1
 [ -d "$X64_HOME/steamrt-shim" ] && export STEAM_RUNTIME_STEAMRT=$X64_HOME/steamrt-shim
-# Not steamrt-shim/bin on PATH: with steam-runtime-launch-client found, the client hands a game
-# to pressure-vessel's launcher service over the session bus, finds none and the game ends at once.
-# Without it the client logs "Failed to wrap process item with launch client" and runs it itself.
+# The client believes it is inside the SteamRT container (the recursion guard), so it starts games
+# and system commands "alongside Steam" through steam-runtime-launch-client: Valve's asks a launcher
+# service on the session bus (there is none - the game ended at once), and without one on PATH the
+# launch fails (No such file). The shim's own launch client runs the command right here.
+[ -d "$X64_HOME/steamrt-shim/bin" ] && export PATH=$X64_HOME/steamrt-shim/bin:$PATH
 export LD_LIBRARY_PATH=$STEAM_X64/steamrt64:$STEAM_X64/steamrt64/panorama:$X64_HOME/steamrt-libs
 # After an update the client re-executes itself inside the SteamRT container through
 # pressure-vessel-wrap, which needs bwrap. The FEX rootfs with the client's own steamrt64 libraries
