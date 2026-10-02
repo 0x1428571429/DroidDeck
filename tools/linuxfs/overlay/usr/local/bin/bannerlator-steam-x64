@@ -209,6 +209,10 @@ LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$srt_libs
 # pressure-vessel-wrap, which needs bwrap. The FEX rootfs with the client's own steamrt64 libraries
 # is that container here; the client's recursion guard says it is already inside one.
 export STEAM_STEAMRT_RECURSION_GUARD=1
+# proot is a tracer, so tier0 believes a debugger is attached and breaks into it with int3 on the
+# first failed assertion: the web helper died of SIGTRAP a second after every start. The session
+# shim hides the tracer from the x86 web helper too (preload/tracer.c).
+export BL_WEBHELPER_HIDE_TRACER=1
 cd "$STEAM_X64"
 # The webhelper on Wayland: on X11, Chromium sets up GBM on the render node the X server hands out
 # over DRI3 even with the GPU off, loops on KMS dumb-buffer ioctls against the KGSL device and never

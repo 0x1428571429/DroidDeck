@@ -20,6 +20,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/syscall.h>
@@ -47,9 +48,14 @@ static int is_status_path(const char *path) {
 }
 
 /* Chromium stands its hang watchdogs down when it sees a tracer, and the client's web helper does
- * not come up within their patience here: it is left reading the truth. */
+ * not come up within their patience here: it is left reading the truth. Not so for the x86-64
+ * client under FEX (BL_WEBHELPER_HIDE_TRACER=1, set by bannerlator-steam-x64): its tier0 breaks
+ * into the supposed debugger with int3 on the first failed assertion, and the web helper dies of
+ * SIGTRAP a second after it starts. */
 static int is_web_helper(void) {
-  return strcmp(program_invocation_short_name, "steamwebhelper") == 0;
+  if (strcmp(program_invocation_short_name, "steamwebhelper") != 0) return 0;
+  const char *hide = getenv("BL_WEBHELPER_HIDE_TRACER");
+  return !(hide && hide[0] == '1');
 }
 
 static int write_all(int fd, const char *data, size_t len) {
