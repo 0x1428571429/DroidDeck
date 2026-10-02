@@ -15,7 +15,7 @@
 # ~1.5 GB) and the x86 client (~600 MB). Log: $X64_HOME/steam-x64.log.
 set -eu
 FEX_TAG=fex-2609-r2
-FEX_SHA256=PENDING
+FEX_SHA256=5c5fb5bfc2a78879fc4488d2b4cdea0d40d9268d9551bdc37c123e36da21b9c7
 FEX_URL=https://github.com/Droid-Deck/DroidDeck/releases/download/$FEX_TAG/fex.tzst
 ROOTFS_URL=https://rootfs.fex-emu.gg/Ubuntu_24_04/2026-08-11/Ubuntu_24_04.sqsh
 CDN=https://client-update.fastly.steamstatic.com
