@@ -141,6 +141,12 @@ export FEX_ROOTFS=$ROOTFS
 # every x86 library lookup then falls through to the arm64 guest. Stop it, so the next FEX
 # starts one with this rootfs.
 /usr/local/bin/FEXServer -k >/dev/null 2>&1 || true
+# BL_FEXSERVER_LOG: a FEXServer of our own in the foreground, logging there - every FEX process that
+# logs to "server" (FEX_OUTPUTLOG, or an AppConfig) then has its lines tagged with its pid.
+if [ -n "${BL_FEXSERVER_LOG:-}" ]; then
+  "$(dirname "${BL_FEX:-/usr/local/bin/FEX}")/FEXServer" -f -p 600 >"$BL_FEXSERVER_LOG" 2>&1 &
+  sleep 1
+fi
 export STEAM_EXTRA_COMPAT_TOOLS_PATHS=
 # What steam.sh sets up before it runs the client, for the x86 tree.
 mkdir -p "$X64_HOME/.steam"
