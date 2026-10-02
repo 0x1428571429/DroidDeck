@@ -225,9 +225,73 @@ cd "$STEAM_X64"
 # over DRI3 even with the GPU off, loops on KMS dumb-buffer ioctls against the KGSL device and never
 # brings a browser up (the client restarts it every 10 s). On Wayland without a GPU it draws to
 # shared-memory buffers.
+# --- what bannerlator-session gives the arm64 client ---------------------------------------
+# The client's connection header and Settings > Internet come from NetworkManager on the SYSTEM
+# bus; without them it shows no connection while downloads run. Same bus config and stand-in as the
+# session, started here when no system bus is up (a desktop has none), stopped with the client.
+x64_bus= x64_nm= x64_pin=
+x64_cleanup() {
+  [ -n "$x64_pin" ] && kill "$x64_pin" 2>/dev/null
+  [ -n "$x64_nm" ] && kill "$x64_nm" 2>/dev/null
+  [ -n "$x64_bus" ] && kill "$x64_bus" 2>/dev/null
+  return 0
+}
+trap x64_cleanup EXIT
+if ! pgrep -f 'dbus-daemon --config-file=/usr/local/share/bannerlator/system-bus.conf' >/dev/null 2>&1 \
+   && command -v dbus-daemon >/dev/null 2>&1 && command -v bannerlator-netmanager >/dev/null 2>&1; then
+  mkdir -p /run/dbus /usr/local/share/bannerlator
+  cat > /usr/local/share/bannerlator/system-bus.conf <<'BUSCONF'
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>system</type>
+  <listen>unix:path=/run/dbus/system_bus_socket</listen>
+  <auth>EXTERNAL</auth>
+  <policy context="default">
+    <allow user="*"/>
+    <allow own="*"/>
+    <allow send_destination="*"/>
+    <allow receive_sender="*"/>
+  </policy>
+</busconfig>
+BUSCONF
+  rm -f /run/dbus/system_bus_socket
+  dbus-daemon --config-file=/usr/local/share/bannerlator/system-bus.conf --nofork --nopidfile &
+  x64_bus=$!
+  for _ in $(seq 1 50); do [ -S /run/dbus/system_bus_socket ] && break; sleep 0.1; done
+  if [ -S /run/dbus/system_bus_socket ]; then
+    bannerlator-netmanager &
+    x64_nm=$!
+    step "network: system bus up, NetworkManager stand-in running"
+  else
+    step "network: the system bus did not come up; the client will show no connection"
+  fi
+fi
+# What a killed client leaves behind: .crash opens the update UI on its spinner, stale htmlcache
+# Singleton* locks can leave the UI blank (as in bannerlator-session).
+if ! pgrep -f 'steamrt64/steam( |$)' >/dev/null 2>&1; then
+  for f in "$STEAM_X64/.crash" "$STEAM_X64/steam.pid" "$STEAM_X64/config/htmlcache/SingletonLock" \
+           "$STEAM_X64/config/htmlcache/SingletonCookie" "$STEAM_X64/config/htmlcache/SingletonSocket"; do
+    { [ -e "$f" ] || [ -L "$f" ]; } && rm -f "$f"
+  done
+fi
+# The session's CPU set for the client (BL_CLIENT_CPUS): Steam pins itself and its web helper to a
+# few cores; re-pin every 5 s as the session does for the arm64 client.
+if [ -n "${BL_CLIENT_CPUS:-}" ] && command -v taskset >/dev/null 2>&1; then
+  (
+    while sleep 5; do
+      for pid in $(ps -A -o PID,ARGS | awk '$2=="FEX" && ($3 ~ /steamrt64\/steam$/ || $3 ~ /steamwebhelper$/) {print $1}'); do
+        taskset -a -p -c "$BL_CLIENT_CPUS" "$pid" >/dev/null 2>&1
+      done
+    done
+  ) &
+  x64_pin=$!
+fi
 # BL_FEX: another FEX build for the client and everything it starts (a DEBUG_STRACE one, say).
 # Restart on request (42, as steam.sh does), at most a few times.
 for attempt in 1 2 3 4 5; do
+  # The branch on disk must match -clientbeta before every start, or the client loops on rc=42.
+  echo publicbeta > "$STEAM_X64/package/beta"
   step "starting the x86-64 SteamRT3 client under FEX (attempt $attempt): $*"
   rc=0
   "${BL_FEX:-/usr/local/bin/FEX}" "$STEAM_X64/steamrt64/steam" -clientbeta publicbeta -no-cef-sandbox \
