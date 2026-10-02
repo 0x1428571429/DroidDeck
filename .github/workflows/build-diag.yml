@@ -2,6 +2,10 @@ name: Build diagnostics
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'tools/diag/**'
+      - '.github/workflows/build-diag.yml'
 
 jobs:
   build:
