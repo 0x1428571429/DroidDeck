@@ -424,6 +424,18 @@ object SessionPrefs {
         prefs(context).edit().putBoolean("logs", on).apply()
     }
 
+    /**
+     * VAC diagnostics (see [VacDiagnostics]): Source-engine games launched with -condebug and their
+     * console plus the client's VAC lines summarised into vac.txt. Off by default: it changes a
+     * game's command line.
+     */
+    fun vacDiagnostics(context: Context): Boolean =
+        prefs(context).getBoolean("vac_diagnostics", false)
+
+    fun setVacDiagnostics(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("vac_diagnostics", on).apply()
+    }
+
     // ── Per-mode display ────────────────────────────────────────────────────────────────────
 
     /**

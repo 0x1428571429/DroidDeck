@@ -483,6 +483,8 @@
     <string name="setup_session">Sesión</string>
     <string name="setup_logs">Registros de sesión</string>
     <string name="setup_logs_hint">Se guardan tras cada sesión</string>
+    <string name="setup_vac_diag">Diagnóstico de VAC</string>
+    <string name="setup_vac_diag_hint">Los juegos Source registran su consola (-condebug); vac.txt en los registros dice si es seguro o no</string>
     <string name="setup_latest_logs">Últimos registros de sesión</string>
     <string name="setup_saved_logs">Registros de sesión guardados</string>
     <string name="setup_saved_logs_hint">Conserva los %1$d más recientes</string>

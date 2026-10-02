@@ -189,6 +189,37 @@ bl_idtech3() {
 }
 """
 
+# VAC diagnostics (the app's Setup page): a Source-engine game says whether it started VAC-secure
+# only in its own console, and writes that console to <mod>/console.log only with -condebug. Armed
+# per session by the app (~/.droiddeck-vac-diagnostics); each launch is noted for its summary.
+# Nothing else about the launch changes - this only asks the game to keep its own log.
+BL_VACDIAG_SETUP = """
+bl_vacdiag() {
+  [ -f "${HOME:-/root}/.droiddeck-vac-diagnostics" ] || return 0
+  [ "${verb:-}" = waitforexitandrun ] || return 0
+  local exe= a dir added=no app=${SteamAppId:-${STEAM_COMPAT_APP_ID:-0}}
+  for a in "$@"; do case $a in *.exe|*.EXE) exe=$a ;; esac; done
+  [ -n "$exe" ] || return 0
+  dir=$(dirname "$exe")
+  # Source: <game>/<mod>/gameinfo.txt beside the exe. Source 2: <game>/game/bin/win64/<exe> with
+  # <game>/game/<mod>/gameinfo.gi.
+  if ls "$dir"/*/gameinfo.txt >/dev/null 2>&1 || ls "$dir"/../../*/gameinfo.gi >/dev/null 2>&1; then
+    case " $* " in
+      *" -condebug "*) echo "bannerlator-proton: vac-diag: app $app already has -condebug" >&2 ;;
+      *) BL_EXTRA_ARGS+=(-condebug); added=yes
+         echo "bannerlator-proton: vac-diag: app $app is a Source title; launched with -condebug" >&2 ;;
+    esac
+  else
+    added=not-source
+    echo "bannerlator-proton: vac-diag: app $app is not a Source title; it keeps no console log to read" >&2
+  fi
+  case " $* " in
+    *" -insecure "*) echo "bannerlator-proton: vac-diag: app $app has -insecure in its launch options - it can never be VAC-secure this way" >&2 ;;
+  esac
+  printf '%s\tapp %s\tcondebug %s\t%s\n' "$(date +%s)" "$app" "$added" "${exe##*/}" >> "${HOME:-/root}/.droiddeck-vac-launches"
+}
+"""
+
 BL_DIRECTAUDIO_SETUP = """
 bl_directaudio() {
   base=$1
@@ -271,6 +302,7 @@ if [ -n "$depot" ]; then
   bl_directaudio "$depot"
   bl_game_cpus
   bl_idtech3 "$@"
+  bl_vacdiag "$@"
   bl_libpath
   exec ${BL_TASKSET:-} /usr/local/bin/bannerlator-game-env "$depot/proton" "$verb" "$@" "${BL_EXTRA_ARGS[@]}"
 fi
@@ -282,7 +314,7 @@ exit 1
 # something else.
 LAUNCHER_SH = LAUNCHER_SH.replace(
     "verb=$1; shift", "verb=$1; shift\n" + BL_DIRECTAUDIO_SETUP + BL_GAME_CPUS_SETUP + BL_IDTECH3_SETUP
-    + BL_COMPONENTS_SETUP + BL_LIBPATH_SETUP, 1)
+    + BL_VACDIAG_SETUP + BL_COMPONENTS_SETUP + BL_LIBPATH_SETUP, 1)
 
 # A third-party Proton dropped into compatibilitytools.d - GE-Proton, proton-cachyos, anything of
 # that shape - is adopted rather than used as shipped, for the same two reasons Valve's ARM64 depot
@@ -318,6 +350,7 @@ bl_components "$here"
 bl_directaudio "$here"
 bl_game_cpus
 bl_idtech3 "$@"
+bl_vacdiag "$@"
 bl_libpath
 # Proton takes its base directory from dirname(sys.argv[0]) without resolving it, so it has to be
 # started from its own tree.
@@ -503,7 +536,7 @@ def adopt_extras(tools):
             body = (EXTRA_WRAPPER_SH % entry_point).replace(
                     'here=$(dirname "$0")',
                     'here=$(dirname "$0")\n' + BL_DIRECTAUDIO_SETUP + BL_GAME_CPUS_SETUP + BL_IDTECH3_SETUP
-                    + BL_COMPONENTS_SETUP + BL_LIBPATH_SETUP, 1)
+                    + BL_VACDIAG_SETUP + BL_COMPONENTS_SETUP + BL_LIBPATH_SETUP, 1)
             write_changed(wrapper, body, 0o755)
             write_changed(manifest, EXTRA_MANIFEST_VDF)
             write_changed(compat_vdf, EXTRA_COMPAT_TOOL_VDF % (name, entry))
