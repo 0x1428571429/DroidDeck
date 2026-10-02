@@ -2,8 +2,8 @@
 # Runs INSIDE an Arch Linux ARM container (menci/archlinuxarm:base-devel) on an arm64 runner.
 # Builds FEX for the runtime, with tools/fex/patches, (Arch Linux ARM ships no package and FEX publishes no Linux
 # binaries), plus the runtime's own unsquashfs to unpack FEX's x86 rootfs image, and packs both
-# as fex.tzst (usr/local/...) for bannerlator-steam-x64 to stage. No thunks: they need an x86
-# cross toolchain, and the x86-64 Steam client only needs FEX to run, not host GPU drivers.
+# as fex.tzst (usr/local/...) for bannerlator-steam-x64 to stage. FEX_THUNKS=1 adds the host
+# thunks (see below).
 set -euxo pipefail
 VERSION=${FEX_VERSION:-FEX-2609}
 WORK=/work
@@ -14,6 +14,38 @@ grep -q '^DisableSandbox' /etc/pacman.conf || sed -i 's/^\[options\]/[options]\n
 mv /etc/pacman.d/mirrorlist.new /etc/pacman.d/mirrorlist
 pacman -Syu --noconfirm --needed git zstd binutils cmake ninja clang lld llvm python squashfs-tools file
 
+# FEX_THUNKS=1: host thunks too - an x86 program's libvulkan/libGL/libX11/... calls go to the
+# runtime's own arm64 libraries (Turnip, Mesa), so the x86-64 client draws on the GPU. The host
+# half is arm64 and needs the graphics dev packages; the guest half is cross-compiled with clang
+# against an x86 sysroot: Arch Linux x86_64 (and multilib i686) packages unpacked into a root of
+# their own by pacman - never run, so no scriptlets and no signature checks.
+THUNKS=${FEX_THUNKS:-0}
+X86ROOT=$WORK/x86root
+if [ "$THUNKS" = 1 ]; then
+  pacman -S --noconfirm --needed pkgconf libx11 libxcb libxrandr libxrender libxext xorgproto \
+    libglvnd mesa wayland libdrm alsa-lib libxshmfence vulkan-headers vulkan-icd-loader
+  rm -rf "$X86ROOT" && mkdir -p "$X86ROOT/var/lib/pacman"
+  cat > "$WORK/x86-pacman.conf" <<'CONF'
+[options]
+Architecture = x86_64
+SigLevel = Never
+DisableSandbox
+[core]
+Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
+[extra]
+Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
+[multilib]
+Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch
+CONF
+  pacman --config "$WORK/x86-pacman.conf" --root "$X86ROOT" --dbpath "$X86ROOT/var/lib/pacman" \
+    --cachedir "$WORK/x86-cache" --noscriptlet --noconfirm --overwrite '*' -Sy \
+    glibc linux-api-headers gcc gcc-libs libx11 libxcb xorgproto libxrandr libxrender libxext libxau \
+    libxdmcp libglvnd mesa wayland libdrm alsa-lib libxshmfence \
+    lib32-glibc lib32-gcc-libs lib32-libx11 lib32-libxcb lib32-libxrandr lib32-libxrender \
+    lib32-libxext lib32-libglvnd lib32-mesa lib32-wayland lib32-libdrm lib32-alsa-lib lib32-libxshmfence
+  ls "$X86ROOT/usr/include" | head -5
+fi
+
 rm -rf fex-src out && git clone -q --depth 1 --branch "$VERSION" --recurse-submodules --shallow-submodules https://github.com/FEX-Emu/FEX.git fex-src
 # Our proot answers openat2 with ENOSYS (tools/proot/PATCHES.md, 0008); FEX opened every rootfs
 # path with openat2 and fell through to the arm64 guest's files on anything but EXDEV.
@@ -23,7 +55,8 @@ cmake -S fex-src -B fex-build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DUSE_LINKER=lld \
   -DTUNE_CPU=none -DTUNE_ARCH=armv8-a \
-  -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF -DENABLE_ASSERTIONS=OFF \
+  -DBUILD_TESTING=OFF -DBUILD_FEXCONFIG=OFF -DENABLE_ASSERTIONS=OFF \
+  $( [ "$THUNKS" = 1 ] && echo "-DBUILD_THUNKS=ON -DX86_DEV_ROOTFS=$X86ROOT" || echo "-DBUILD_THUNKS=OFF" ) \
   -DENABLE_CCACHE=OFF -DENABLE_OFFLINE_TELEMETRY=OFF \
   ${FEX_EXTRA_CXXFLAGS:+-DCMAKE_CXX_FLAGS="$FEX_EXTRA_CXXFLAGS"}
 ninja -C fex-build

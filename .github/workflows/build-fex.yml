@@ -14,6 +14,10 @@ on:
         description: 'Release tag to publish as (e.g. fex-2609-r1); empty = artifact only'
         required: false
         default: ''
+      thunks:
+        description: 'Build the host thunks (Vulkan/GL/X11/... to the runtime arm64 libraries)'
+        required: false
+        default: 'false'
       cxxflags:
         description: 'Extra CXXFLAGS for a diagnostic build (e.g. -DDEBUG_STRACE); never published with a tag'
         required: false
@@ -31,7 +35,7 @@ jobs:
       - name: Build in Arch Linux ARM
         run: |
           set -euo pipefail
-          docker run --rm -e FEX_EXTRA_CXXFLAGS="${{ inputs.cxxflags }}" -v "$PWD:/work" -w /work menci/archlinuxarm:base-devel bash tools/fex/build-in-arch.sh
+          docker run --rm -e FEX_EXTRA_CXXFLAGS="${{ inputs.cxxflags }}" -e FEX_THUNKS="${{ inputs.thunks == 'true' && '1' || '0' }}" -v "$PWD:/work" -w /work menci/archlinuxarm:base-devel bash tools/fex/build-in-arch.sh
           sudo chown -R "$(id -u):$(id -g)" .
       - uses: actions/upload-artifact@v4
         with:
