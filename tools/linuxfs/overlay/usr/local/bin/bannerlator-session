@@ -656,9 +656,9 @@ BUSCONF
     [ "${BL_STEAM_UI:-}" = desktop ] && _bl_ui=()
     # Software compatibility mode: CEF and Steam use CPU frames through Xwayland,
     # inside either the desktop or the software Gamescope session.
-    _bl_cef=(-cef-force-gpu -cef-use-gl=angle -cef-use-angle=vulkan)
+    _bl_cef=(-cef-force-gpu -cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan)
     if [ "${BL_STEAM_SOFTWARE:-0}" = 1 ]; then
-      _bl_cef=(-cef-disable-gpu -cef-disable-gpu-compositing)
+      _bl_cef=(-cef-disable-gpu -cef-disable-gpu-compositing -cef-ozone-platform=x11)
       export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
       export MESA_LOADER_DRIVER_OVERRIDE=swrast SDL_RENDER_DRIVER=software SDL_VIDEODRIVER=x11
       echo "== steam: software rendering requested"
@@ -722,7 +722,7 @@ BUSCONF
         done
       ) &
     fi
-    echo "== steam args: ${_bl_ui[*]} -clientbeta $steam_channel -no-cef-sandbox -cef-ozone-platform=x11 ${_bl_cef[*]} $*"
+    echo "== steam args: ${_bl_ui[*]} -clientbeta $steam_channel -no-cef-sandbox ${_bl_cef[*]} $*"
     # An update that cannot install asks for a restart (rc=42) every time; the count is capped so a
     # session can never again loop in silence, which reads as a menu opening and closing by itself.
     steam_updates=0
@@ -769,7 +769,7 @@ BUSCONF
       fi
       step "starting the Steam client${BL_STEAM_UI:+ ($BL_STEAM_UI UI)}"
       "$steam_root/steamrtarm64/steam" "${_bl_ui[@]}" -clientbeta "$steam_channel" \
-        -no-cef-sandbox -cef-ozone-platform=x11 "${_bl_cef[@]}" "$@"
+        -no-cef-sandbox "${_bl_cef[@]}" "$@"
       rc=$?
       echo "== steam exited rc=$rc"
       collect_steam_logs
