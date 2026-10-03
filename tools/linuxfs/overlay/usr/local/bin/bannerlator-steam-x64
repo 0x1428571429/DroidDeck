@@ -34,6 +34,21 @@ LOG=$X64_HOME/steam-x64.log
 mkdir -p "$X64_HOME"
 step() { echo "== $(date -u +%H:%M:%S) $*" | tee -a "$LOG"; }
 
+# The arm64 Proton wrapper this client maps Windows titles to: the newest GE-Proton, else the arm64
+# client's own (bannerlator-proton-arm64, Proton Experimental). Prints its folder; --default-tool
+# prints its tool name, which the session hands to bannerlator-steam-compat and the shortcuts.
+x64_default_dir() {
+  local d
+  for d in $(ls -d "$STEAM_X64"/compatibilitytools.d/GE-Proton*-aarch64 2>/dev/null | sort -V -r); do
+    [ -f "$d/.droiddeck-arm64-proton" ] && { echo "$d"; return; }
+  done
+  echo "$STEAM_X64/compatibilitytools.d/bannerlator-proton-arm64"
+}
+x64_default_tool() {
+  sed -n 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*$/\1/p' "$(x64_default_dir)/compatibilitytool.vdf" 2>/dev/null |
+    grep -v -x -e compatibilitytools -e compat_tools | head -n 1
+}
+
 x64_prepare() {
 # --- FEX -------------------------------------------------------------------------------------
 if [ ! -x /usr/local/bin/FEX ] || [ "$(cat /usr/local/share/fex-emu/.droiddeck-tag 2>/dev/null)" != "$FEX_TAG" ]; then
@@ -377,11 +392,7 @@ PY
   # with bannerlator-proton-arm64 (Proton Experimental) Xwayland never got its window buffers back
   # and FlatOut took the device's RAM with it (10.5 GB of dma-buf in 35 s); GE-Proton, same game,
   # same client, stayed flat. bannerlator-proton-a64 when no GE-Proton is installed.
-  default=
-  for d in $(ls -d "$STEAM_X64"/compatibilitytools.d/GE-Proton*-aarch64 2>/dev/null | sort -V -r); do
-    [ -f "$d/.droiddeck-arm64-proton" ] && { default=$d; break; }
-  done
-  [ -n "$default" ] || default=$STEAM_X64/compatibilitytools.d/bannerlator-proton-arm64
+  default=$(x64_default_dir)
   if [ -f "$default/compatibilitytool.vdf" ] && [ -f "$STEAM_X64/config/config.vdf" ] &&
      ! pgrep -f 'steamrt64/steam( |$)' >/dev/null 2>&1; then
     python3 - "$STEAM_X64/config/config.vdf" "$default/compatibilitytool.vdf" <<'PY' || step "could not make ARM64 Proton the default"
@@ -412,6 +423,39 @@ if z:
 entry = ('\n\t\t\t\t\t"0"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"%s"\n' % tool +
          '\t\t\t\t\t\t"config"\t\t""\n\t\t\t\t\t\t"priority"\t\t"75"\n\t\t\t\t\t}')
 s = s[:m.end()] + entry + s[m.end():]
+open(path, "w", encoding="utf-8", errors="surrogateescape").write(s)
+PY
+  fi
+  # The startup movie the app stages for the arm64 client (its config/uioverrides/movies, chosen in
+  # its config.vdf as StartupMovie): the same one here, through a link to that folder and the same
+  # choice in this client's config. And Decky's marker for the client's CEF debugging port, which the
+  # loader talks to whichever client runs: the browser is the arm64 one either way.
+  if [ -d "$ARM_STEAM/config/uioverrides" ] && [ ! -e "$STEAM_X64/config/uioverrides" ]; then
+    ln -s "$ARM_STEAM/config/uioverrides" "$STEAM_X64/config/uioverrides"
+  fi
+  if [ -f "$ARM_STEAM/.cef-enable-remote-debugging" ]; then
+    : > "$STEAM_X64/.cef-enable-remote-debugging"
+  else
+    rm -f "$STEAM_X64/.cef-enable-remote-debugging"
+  fi
+  if [ -f "$ARM_STEAM/config/config.vdf" ] && [ -f "$STEAM_X64/config/config.vdf" ] &&
+     ! pgrep -f 'steamrt64/steam( |$)' >/dev/null 2>&1; then
+    python3 - "$ARM_STEAM/config/config.vdf" "$STEAM_X64/config/config.vdf" <<'PY' || step "could not copy the startup movie choice"
+import re, sys
+movie = re.search(r'\n([ \t]*)"StartupMovie"\s*\{[^{}]*\}', open(sys.argv[1], encoding="utf-8", errors="replace").read())
+if not movie:
+    sys.exit(0)
+path = sys.argv[2]
+s = open(path, encoding="utf-8", errors="surrogateescape").read()
+old = re.search(r'\n[ \t]*"StartupMovie"\s*\{[^{}]*\}', s)
+if old:
+    if old.group(0).split(None, 1)[1] == movie.group(0).split(None, 1)[1]:
+        sys.exit(0)
+    s = s[:old.start()] + s[old.end():]
+steam = re.search(r'"Valve"\s*\{\s*"Steam"\s*\{', s)
+if not steam:
+    sys.exit(0)
+s = s[:steam.end()] + movie.group(0) + s[steam.end():]
 open(path, "w", encoding="utf-8", errors="surrogateescape").write(s)
 PY
   fi
@@ -546,6 +590,7 @@ case "${1:-}" in
   --prepare) x64_prepare; exit 0 ;;
   --exec) shift; x64_exec "$@" ;;
   --gpu) x64_gpu; exit $? ;;
+  --default-tool) x64_default_tool; exit 0 ;;
 esac
 
 # --- standalone (the desktop menu entry) ------------------------------------------------------
