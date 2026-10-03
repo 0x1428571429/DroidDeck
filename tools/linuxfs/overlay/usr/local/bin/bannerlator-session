@@ -53,7 +53,15 @@ trap 'collect_steam_logs 2>/dev/null || true' TERM INT HUP
 # VK_DRIVER_FILES REPLACES the loader's search, so a manifest whose library is unreadable would
 # leave the session with no Vulkan at all - check both before setting it, and say so in the log
 # rather than fail silently half a minute later.
-if [ -n "${BL_VK_DRIVER:-}" ]; then
+# Compatibility mode: the Android presenter still uses its selected Vulkan driver, while the
+# Linux session renders on the CPU. Gamescope's SDL swapchain can carry these frames as wl_shm;
+# its Wayland backend requires exportable dma-bufs even for its dummy black texture.
+if [ "${BL_STEAM_SOFTWARE:-0}" = 1 ]; then
+  export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+  export VK_ICD_FILENAMES=$VK_DRIVER_FILES
+  export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe MESA_LOADER_DRIVER_OVERRIDE=swrast
+  echo "== linux graphics: software rendering requested (Lavapipe/llvmpipe)"
+elif [ -n "${BL_VK_DRIVER:-}" ]; then
   bl_icd_lib=$(sed -n 's/.*"library_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$BL_VK_DRIVER" 2>/dev/null | head -1)
   # JSON may escape the separator: org.json writes "\/data\/user\/0\/...". The Vulkan loader
   # parses that correctly; this check has to as well, or an absolute path looks relative and gets
@@ -148,7 +156,13 @@ if [ -z "${BL_INSIDE:-}" ]; then
       echo "== gamescope: games at ${nested}x${height} stretched to the ${width}x${height} output"
     fi
   fi
-  args=(--backend wayland --expose-wayland -f -W "$width" -H "$height" -w "$nested" -h "$height")
+  backend=wayland
+  if [ "${BL_STEAM_SOFTWARE:-0}" = 1 ]; then
+    backend=sdl
+    export SDL_VIDEODRIVER=wayland
+    echo "== gamescope: SDL Wayland swapchain for software rendering"
+  fi
+  args=(--backend "$backend" --expose-wayland -f -W "$width" -H "$height" -w "$nested" -h "$height")
   [ "$nested" != "$width" ] && args+=(-S stretch)
   # -r is what gamescope advertises as the refresh rate, and what a game reads as the display's.
   # Left unset it defaults to 60, so a 120 Hz panel offers only 60 Hz in game settings. The FPS
@@ -179,7 +193,8 @@ if [ -z "${BL_INSIDE:-}" ]; then
   # MANGOHUD_CONFIGFILE. The apk stages Valve's aarch64 build (tools/mangoapp) - without it the menu
   # still offers the levels and nothing appears. Starts hidden until the client writes a level.
   # BL_MANGOAPP=0 turns it off (one community build found Valve's mangoapp crashing on Turnip).
-  if [ "$mode" = steam ] && [ "${BL_STEAMDECK:-0}" = 1 ] && [ "${BL_MANGOAPP:-1}" = 1 ] \
+  if [ "$mode" = steam ] && [ "${BL_STEAM_SOFTWARE:-0}" != 1 ] \
+     && [ "${BL_STEAMDECK:-0}" = 1 ] && [ "${BL_MANGOAPP:-1}" = 1 ] \
      && [ "${BL_STEAM_UI:-}" != desktop ] && command -v mangoapp >/dev/null 2>&1; then
     MANGOHUD_CONFIGFILE=$(mktemp /tmp/mangohud.XXXXXXXX)
     echo no_display > "$MANGOHUD_CONFIGFILE"
@@ -639,6 +654,15 @@ BUSCONF
     # desktop's launchers ask for; gamescope shows one window at a time and the game takes over.
     _bl_ui=(-gamepadui)
     [ "${BL_STEAM_UI:-}" = desktop ] && _bl_ui=()
+    # Software compatibility mode: CEF and Steam use CPU frames through Xwayland,
+    # inside either the desktop or the software Gamescope session.
+    _bl_cef=(-cef-force-gpu -cef-use-gl=angle -cef-use-angle=vulkan)
+    if [ "${BL_STEAM_SOFTWARE:-0}" = 1 ]; then
+      _bl_cef=(-cef-disable-gpu -cef-disable-gpu-compositing)
+      export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+      export MESA_LOADER_DRIVER_OVERRIDE=swrast SDL_RENDER_DRIVER=software SDL_VIDEODRIVER=x11
+      echo "== steam: software rendering requested"
+    fi
     # Deck mode (BL_STEAMDECK=1, the Steam page's Client settings): -steamdeck is the flag that puts
     # the Quick Access Menu and the Deck settings pages on screen; the QAM's performance overlay
     # controls stay greyed out without -steamos3, as SteamOS and Armada launch it. -steamos3 makes
@@ -698,7 +722,7 @@ BUSCONF
         done
       ) &
     fi
-    echo "== steam args: ${_bl_ui[*]} -clientbeta $steam_channel -no-cef-sandbox -cef-force-gpu -cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan $*"
+    echo "== steam args: ${_bl_ui[*]} -clientbeta $steam_channel -no-cef-sandbox -cef-ozone-platform=x11 ${_bl_cef[*]} $*"
     # An update that cannot install asks for a restart (rc=42) every time; the count is capped so a
     # session can never again loop in silence, which reads as a menu opening and closing by itself.
     steam_updates=0
@@ -745,8 +769,7 @@ BUSCONF
       fi
       step "starting the Steam client${BL_STEAM_UI:+ ($BL_STEAM_UI UI)}"
       "$steam_root/steamrtarm64/steam" "${_bl_ui[@]}" -clientbeta "$steam_channel" \
-        -no-cef-sandbox -cef-force-gpu -cef-ozone-platform=x11 \
-        -cef-use-gl=angle -cef-use-angle=vulkan "$@"
+        -no-cef-sandbox -cef-ozone-platform=x11 "${_bl_cef[@]}" "$@"
       rc=$?
       echo "== steam exited rc=$rc"
       collect_steam_logs

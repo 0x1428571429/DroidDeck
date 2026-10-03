@@ -338,6 +338,12 @@ public final class TurnipDriver {
             if (forced.startsWith("a7")) return DRIVER_A7XX;
         }
         String model = gpuModel();
+        // A Mali kbase node is positive evidence. Unknown hardware keeps the existing default.
+        if (model == null && new File("/dev/mali0").exists()
+                && !com.droiddeck.launcher.core.DeviceSupport.INSTANCE.adreno()) {
+            Log.i(TAG, "Mali kbase GPU: using system Vulkan for the compositor");
+            return null;
+        }
         Log.i(TAG, "gpu model: " + (model == null ? "unknown" : model));
         if (model != null) {
             // "Adreno750", "adreno_830" - the generation is the first digit of the three.

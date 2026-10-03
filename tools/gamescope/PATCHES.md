@@ -49,3 +49,13 @@ library list, before anything is published.
 
 Sixteen more of Armada's patches are DRM/lease/HDR-on-KMS work for a native display, which this
 app's Wayland-hosted gamescope never reaches, or need a newer gamescope than the runtime has.
+
+- `0114-software-swapchain-compat.patch` - this app: only with
+  `BL_STEAM_SOFTWARE=1`, allow the SDL Vulkan swapchain to run without present-ID/wait
+  support and keep local textures private. Explicit exports and dma-buf imports retain
+  their allocation requirements. With the mode unset, extension requests, feature chains,
+  texture allocation and present-wait pacing follow the existing path.
+- `0115-software-shm-commits.patch` - this app: only in that compatibility mode,
+  refresh reused shared-memory buffers on every commit and treat their completed
+  synchronous uploads as ready. Normal sessions retain buffer memoization and fence
+  handling; dma-buf commits retain both in either mode.

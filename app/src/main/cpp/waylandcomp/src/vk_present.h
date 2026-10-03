@@ -87,6 +87,8 @@ const char *vkp_gpu_name(void);
 
 // 0 if the renderer can create images (device up), -1 otherwise.
 int vkp_ready(void);
+/* Whether the selected driver supports the complete dma-buf import extension set. */
+int vkp_dmabuf_supported(void);
 /* Whether an output window is attached (or requested); without one vkp_render() draws nothing. */
 int vkp_has_window(void);
 /* 1 once the Vulkan device was lost: nothing is presented any more (the session must restart). */

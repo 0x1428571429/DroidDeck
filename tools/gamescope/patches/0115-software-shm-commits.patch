@@ -1,0 +1,61 @@
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index 18b799e..d854a68 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -1850,30 +1850,32 @@ import_commit (
+ 		commit->fifo = false;
+ 	}
+ 
+-	if ( gamescope::OwningRc<CVulkanTexture> pTexture = s_BufferMemos.LookupVulkanTexture( buf ) )
++	struct wlr_dmabuf_attributes dmabuf = {0};
++	// Only the software compatibility path refreshes private wl_shm copies.
++	// Normal sessions retain the original memo lookup before probing the buffer.
++	const bool bRefreshShm = g_bSoftwareCompat && !wlr_buffer_get_dmabuf( buf, &dmabuf );
++	if ( !bRefreshShm )
+ 	{
+-		// Going from OwningRc -> Rc now.
+-		commit->vulkanTex = pTexture;
+-		return commit;
++		if ( gamescope::OwningRc<CVulkanTexture> pTexture = s_BufferMemos.LookupVulkanTexture( buf ) )
++		{
++			commit->vulkanTex = pTexture;
++			return commit;
++		}
+ 	}
+ 
+-	struct wlr_dmabuf_attributes dmabuf = {0};
+ 	gamescope::OwningRc<gamescope::IBackendFb> pBackendFb;
+ 	if ( wlr_buffer_get_dmabuf( buf, &dmabuf ) )
+-	{
+ 		pBackendFb = GetBackend()->ImportDmabufToBackend( &dmabuf );
+-	}
+ 
+ 	gamescope::OwningRc<CVulkanTexture> pOwnedTexture = vulkan_create_texture_from_wlr_buffer( buf, std::move( pBackendFb ) );
+ 
+ 	if ( pOwnedTexture == nullptr ) {
+-		// Failed to create Vulkan texture from Wayland buffer for some reason.
+ 		return nullptr;
+ 	}
+ 
+ 	commit->vulkanTex = pOwnedTexture;
+-
+-	s_BufferMemos.MemoizeBuffer( buf, std::move( pOwnedTexture ) );
++	if ( !bRefreshShm )
++		s_BufferMemos.MemoizeBuffer( buf, std::move( pOwnedTexture ) );
+ 
+ 	return commit;
+ }
+@@ -8504,6 +8506,13 @@ void update_wayland_res(CommitDoneList_t *doneCommits, steamcompmgr_win_t *w, Re
+ 		{
+ 			fence = dup( dmabuf.fd[0] );
+ 		}
++		else if ( g_bSoftwareCompat && GetBackend()->UsesVulkanSwapchain() &&
++		          !newCommit->vulkanTex->externalImage() )
++		{
++			// wl_shm uploads wait for their copy to finish in vulkan_create_texture_from_wlr_buffer.
++			// A private swapchain texture has no dma-buf to poll; it is already ready.
++			bKnownReady = true;
++		}
+ 		else
+ 		{
+ 			fence = newCommit->vulkanTex->memoryFence();

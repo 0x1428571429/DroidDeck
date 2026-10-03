@@ -13,6 +13,7 @@
 # On a software desktop (pixman: the GPU renderers failed on this device) there is no dma-buf, so a
 # game - or the client's own Vulkan window - would die at its first frame. There the request goes
 # to the app, which ends the desktop and starts a Steam session under gamescope in its place.
+# BL_STEAM_SOFTWARE=1 opts into a CPU-rendered client on that desktop for compatibility testing.
 set -u
 ui=${1:-desktop}
 target=${2:-}
@@ -28,7 +29,8 @@ esac
 steam_root=${XDG_DATA_HOME:-${HOME:-/root}/.local/share}/Steam
 client=$steam_root/steamrtarm64/steam
 
-if [ "${BL_DESKTOP:-}" = 1 ] && [ -n "${WLR_RENDERER:-}" ] && [ "$WLR_RENDERER" != pixman ]; then
+if [ "${BL_DESKTOP:-}" = 1 ] && [ -n "${WLR_RENDERER:-}" ] \
+    && { [ "$WLR_RENDERER" != pixman ] || [ "${BL_STEAM_SOFTWARE:-0}" = 1 ]; }; then
   log=${BL_DEBUG_DIR:-$HOME/.cache/droiddeck}/steam-desktop.log
   mkdir -p "$(dirname "$log")" 2>/dev/null
   if pgrep -f 'steamrtarm64/steam( |$)' >/dev/null 2>&1 && [ -x "$client" ]; then
