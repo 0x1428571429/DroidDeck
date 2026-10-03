@@ -1,0 +1,17 @@
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index 18b799e..fe0a712 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -8504,6 +8504,12 @@ void update_wayland_res(CommitDoneList_t *doneCommits, steamcompmgr_win_t *w, Re
+ 		{
+ 			fence = dup( dmabuf.fd[0] );
+ 		}
++		else if ( !newCommit->vulkanTex->externalImage() )
++		{
++			// wl_shm uploads wait for their copy to finish in vulkan_texture_from_wlr_buffer.
++			// A private swapchain texture has no dma-buf to poll; it is already ready.
++			bKnownReady = true;
++		}
+ 		else
+ 		{
+ 			fence = newCommit->vulkanTex->memoryFence();
