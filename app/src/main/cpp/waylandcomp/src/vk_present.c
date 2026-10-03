@@ -412,14 +412,14 @@ static int dev_init(void) {
                    "generation %s)", g_colorspace_ext ? "enables" : "has no",
                    g_colorspace_ext ? "is possible where the screen surface offers one" : "is not possible: tone-mapped instead");
     }
-    /* Prefer 1.3 for the frame-generation feature probe, but respect older system loaders. */
-    uint32_t loader_api = VK_API_VERSION_1_0;
-    if (g_vk.EnumerateInstanceVersion &&
-        g_vk.EnumerateInstanceVersion(&loader_api) != VK_SUCCESS) {
-        LOGE("present: cannot query the Vulkan loader version"); g_dev_state = -1; return -1;
-    }
-    if (loader_api < VK_API_VERSION_1_1) {
-        LOGE("present: Vulkan 1.1 or newer is required"); g_dev_state = -1; return -1;
+    /* Keep the existing 1.3 request unless the selected loader positively reports an
+     * older usable API. Custom ICDs may omit this optional global entry point. */
+    uint32_t loader_api = VK_API_VERSION_1_3;
+    if (g_vk.EnumerateInstanceVersion) {
+        uint32_t reported_api = VK_API_VERSION_1_3;
+        if (g_vk.EnumerateInstanceVersion(&reported_api) == VK_SUCCESS &&
+            reported_api >= VK_API_VERSION_1_1)
+            loader_api = reported_api;
     }
     VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
                              .pApplicationName = "banner-wayland-present",
