@@ -150,6 +150,17 @@ bl_game_cpus() {
 # the client, and a game inherits that: Wine then resolved gnutls, SDL, FFmpeg and the rest against
 # the client's private copies instead of the rootfs it was built for. Inside Steam's runtime
 # container that path never reaches Proton either. (WinNative's winnative-proton-launch.)
+BL_REDISTS_SETUP = """
+bl_redists() {
+  # Steam's shared redistributables marked as already run in this Proton's prefix template and in
+  # the title's prefix, before Proton is reached: the client creates a new prefix and runs the
+  # title's install scripts in one go, and an x86 vcredist under FEX can hang that for good.
+  # (bannerlator-seed-redists has the story.)
+  [ -x /usr/local/bin/bannerlator-seed-redists ] || return 0
+  /usr/local/bin/bannerlator-seed-redists --launch "$1" >&2 || true
+}
+"""
+
 BL_LIBPATH_SETUP = """
 bl_libpath() {
   # A Proton built to prefer PipeWire (CachyOS's among the adopted ones) hung its audio thread
@@ -268,6 +279,7 @@ for name in %s; do
 done
 if [ -n "$depot" ]; then
   bl_components "$depot"
+  bl_redists "$depot"
   bl_directaudio "$depot"
   bl_game_cpus
   bl_idtech3 "$@"
@@ -282,7 +294,7 @@ exit 1
 # something else.
 LAUNCHER_SH = LAUNCHER_SH.replace(
     "verb=$1; shift", "verb=$1; shift\n" + BL_DIRECTAUDIO_SETUP + BL_GAME_CPUS_SETUP + BL_IDTECH3_SETUP
-    + BL_COMPONENTS_SETUP + BL_LIBPATH_SETUP, 1)
+    + BL_COMPONENTS_SETUP + BL_REDISTS_SETUP + BL_LIBPATH_SETUP, 1)
 
 # A third-party Proton dropped into compatibilitytools.d - GE-Proton, proton-cachyos, anything of
 # that shape - is adopted rather than used as shipped, for the same two reasons Valve's ARM64 depot
@@ -315,6 +327,7 @@ if [ -f "$fake" ]; then
   esac
 fi
 bl_components "$here"
+bl_redists "$here"
 bl_directaudio "$here"
 bl_game_cpus
 bl_idtech3 "$@"
@@ -503,7 +516,7 @@ def adopt_extras(tools):
             body = (EXTRA_WRAPPER_SH % entry_point).replace(
                     'here=$(dirname "$0")',
                     'here=$(dirname "$0")\n' + BL_DIRECTAUDIO_SETUP + BL_GAME_CPUS_SETUP + BL_IDTECH3_SETUP
-                    + BL_COMPONENTS_SETUP + BL_LIBPATH_SETUP, 1)
+                    + BL_COMPONENTS_SETUP + BL_REDISTS_SETUP + BL_LIBPATH_SETUP, 1)
             write_changed(wrapper, body, 0o755)
             write_changed(manifest, EXTRA_MANIFEST_VDF)
             write_changed(compat_vdf, EXTRA_COMPAT_TOOL_VDF % (name, entry))
