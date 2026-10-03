@@ -265,11 +265,12 @@ case $mode in
       step "x86-64 Steam client ready"
       steam_root=${BL_X64_HOME:-$HOME/.droiddeck-x64}/.local/share/Steam
       steam_client=(bannerlator-steam-x64 --exec)
-      # The client's browser stays in software: on the GPU its GPU process needs libgbm, which FEX
-      # does not thunk, and the guest GBM cannot share buffers with the Adreno (device: GPU process
-      # restart loop, no first frame). Games still get the GPU through the thunks.
-      # BL_X64_CEF_GPU=1 tries it anyway.
-      if [ "${BL_X64_CEF_GPU:-0}" = 1 ] && bannerlator-steam-x64 --gpu; then
+      # The client's browser is the arm64 client's web helper (bannerlator-x64-arm-webhelper), on the
+      # GPU with the same flags. The x86 one (BL_X64_X86_WEBHELPER=1) stays in software: its GPU
+      # process needs libgbm, which FEX does not thunk (device: GPU process restart loop, no first
+      # frame); BL_X64_CEF_GPU=1 tries it anyway.
+      if [ "${BL_X64_X86_WEBHELPER:-0}" != 1 ] ||
+         { [ "${BL_X64_CEF_GPU:-0}" = 1 ] && bannerlator-steam-x64 --gpu; }; then
         steam_cef=(-cef-force-gpu -cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan)
       else
         steam_cef=(-cef-disable-gpu)

@@ -47,6 +47,7 @@ object SessionFiles {
             // Experimental: Valve's x86-64 client under FEX (desktop menu entry).
             "usr/local/bin/bannerlator-steam-x64" to "usr/local/bin/bannerlator-steam-x64",
             "usr/local/bin/bannerlator-x64-arm-proton" to "usr/local/bin/bannerlator-x64-arm-proton",
+            "usr/local/bin/bannerlator-x64-arm-webhelper" to "usr/local/bin/bannerlator-x64-arm-webhelper",
             "usr/local/bin/bannerlator-desktop-games" to "usr/local/bin/bannerlator-desktop-games",
             "usr/local/bin/bannerlator-steam-shim" to "usr/local/bin/bannerlator-steam-shim",
             "usr/local/bin/bannerlator-steam-shortcuts" to "usr/local/bin/bannerlator-steam-shortcuts",

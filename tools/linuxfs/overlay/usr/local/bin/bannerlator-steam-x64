@@ -455,6 +455,14 @@ if x64_gpu; then
     done
   } > "$X64_HOME/game-gpu.env"
 fi
+# The web helper is the arm64 client's (bannerlator-x64-arm-webhelper), which sets its own GPU
+# environment, so the client itself can have the GPU now: it shows every Big Picture frame the helper
+# draws, and in software (llvmpipe under FEX) that held the UI at ~20 fps. BL_X64_CLIENT_SOFTWARE=1
+# keeps it in software.
+if x64_gpu && [ "${BL_X64_CLIENT_SOFTWARE:-0}" != 1 ]; then
+  export FEX_THUNKCONFIG=$X64_HOME/thunks.json
+  unset LIBGL_ALWAYS_SOFTWARE LIBGL_DRI3_DISABLE
+else
 unset FEX_THUNKCONFIG $gpu_vars
 # x86 Mesa has no driver for this GPU, so software: llvmpipe for GL (the client's own window needs
 # GLX), and the rootfs's own Vulkan ICDs (lavapipe) found by the x86 loader instead of the arm64 one.
@@ -462,6 +470,7 @@ export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
 # The X server hands out the GPU node (DRI3 open), and Mesa's software path then tries KMS dumb
 # buffers on it in a loop: present through plain X instead.
 export LIBGL_DRI3_DISABLE=1
+fi
 # The proot fast path (libblfastpath, preloaded into every guest process, FEX included) stands down
 # by itself when FEX is about to run a 32-bit program (it broke FEX's 32-bit mode: SIGILL at start);
 # 64-bit ones keep it. BL_X64_FP_OFF=1 turns it off for everything, as before.
@@ -504,6 +513,32 @@ export BL_WEBHELPER_HIDE_TRACER=1
 x64_exec() {
   x64_env
   cd "$STEAM_X64"
+  # The client's own web helper launcher, pointed at the arm64 client's helper (FEX hands that arm64
+  # program to the CPU). The client checks its files' sizes at every start and reinstalls itself
+  # over one that differs (device: install loop, "steamwebhelper.sh is 176 bytes, expected 84"), so
+  # the replacement is padded to the size of the client's own copy. It is pointed again whenever it
+  # differs, for as long as this client runs: a full check puts the client's copy back.
+  case "${1:-}" in
+    -shutdown|steam://*) ;;
+    *) if [ "${BL_X64_X86_WEBHELPER:-0}" != 1 ] && [ -x /usr/local/bin/bannerlator-x64-arm-webhelper ]; then
+         (
+           client=$$ wh=$STEAM_X64/steamrt64/steamwebhelper.sh
+           base=$(printf '#!/bin/sh\nexec /usr/local/bin/bannerlator-x64-arm-webhelper "$@"\n#')
+           size= want=
+           while kill -0 "$client" 2>/dev/null; do
+             if [ -f "$wh" ] && ! grep -q bannerlator-x64-arm-webhelper "$wh" 2>/dev/null; then
+               size=$(stat -c %s "$wh") want=
+               pad=$((size - ${#base} - 1))
+               [ "$pad" -ge 0 ] && want=$base$(printf '%*s' "$pad" '' | tr ' ' '-')
+             fi
+             if [ -n "$want" ] && [ "$(cat "$wh" 2>/dev/null)" != "$want" ]; then
+               printf '%s\n' "$want" > "$wh.new" && chmod 755 "$wh.new" && mv -f "$wh.new" "$wh"
+             fi
+             sleep 1
+           done
+         ) &
+       fi ;;
+  esac
   exec "${BL_FEX:-/usr/local/bin/FEX}" "$STEAM_X64/steamrt64/steam" "$@"
 }
 
@@ -597,7 +632,7 @@ for attempt in 1 2 3 4 5; do
   echo publicbeta > "$STEAM_X64/package/beta"
   step "starting the x86-64 SteamRT3 client under FEX (attempt $attempt): $*"
   rc=0
-  if [ "${BL_X64_CEF_GPU:-0}" = 1 ] && x64_gpu; then cef=(-cef-force-gpu -cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan); else cef=(-cef-disable-gpu); fi
+  if [ "${BL_X64_X86_WEBHELPER:-0}" != 1 ] || { [ "${BL_X64_CEF_GPU:-0}" = 1 ] && x64_gpu; }; then cef=(-cef-force-gpu -cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan); else cef=(-cef-disable-gpu); fi
   ( x64_exec -clientbeta publicbeta -no-cef-sandbox "${cef[@]}" "$@" ) >>"$LOG" 2>&1 || rc=$?
   step "client exited rc=$rc"
   [ "$rc" = 42 ] || break
