@@ -291,6 +291,109 @@ for app in apps:
 open(path, "w", encoding="utf-8", errors="surrogateescape").write(s)
 PY
   fi
+  # The arm64 client's Proton tools (bannerlator-proton-arm64, GE-Proton, CachyOS): one wrapper per
+  # tool, same folder and tool name (Components swaps and per-title mappings are keyed by them). The
+  # wrapper is an x86 script under FEX; it starts bannerlator-x64-arm-proton through an arm64 binary,
+  # which FEX hands to the CPU, so Wine and the game run exactly as from the arm64 client.
+  arm_tools=$ARM_STEAM/compatibilitytools.d
+  mkdir -p "$X64_HOME/arm64"
+  cp -f /usr/bin/env "$X64_HOME/arm64/env"
+  for w in "$STEAM_X64"/compatibilitytools.d/*/.droiddeck-arm64-proton; do
+    [ -e "$w" ] || continue
+    d=${w%/.droiddeck-arm64-proton}
+    [ -d "$arm_tools/${d##*/}" ] || rm -rf "$d"
+  done
+  for src in "$arm_tools"/*/; do
+    src=${src%/}; name=${src##*/}
+    [ -f "$src/compatibilitytool.vdf" ] && [ -f "$src/toolmanifest.vdf" ] || continue
+    [ "$name" = droiddeck-direct ] && continue
+    dst=$STEAM_X64/compatibilitytools.d/$name
+    mkdir -p "$dst"
+    : > "$dst/.droiddeck-arm64-proton"
+    # The tool's own name and display name, as the arm64 client shows it.
+    python3 - "$src/compatibilitytool.vdf" "$dst/compatibilitytool.vdf" <<'PY' || { rm -rf "$dst"; continue; }
+import re, sys
+s = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+m = re.search(r'"compat_tools"\s*\{\s*"([^"]+)"', s)
+if not m:
+    sys.exit(1)
+key = m.group(1)
+d = re.search(r'"display_name"\s*"([^"]*)"', s)
+name = d.group(1) if d else key
+open(sys.argv[2], "w").write(
+    '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "%s"\n    {\n      "install_path" "."\n'
+    '      "display_name" "%s"\n      "from_oslist" "windows"\n      "to_oslist" "linux"\n    }\n  }\n}\n'
+    % (key, name))
+PY
+    cat > "$dst/toolmanifest.vdf" <<'VDF'
+"manifest"
+{
+  "version" "2"
+  "commandline" "/run %verb%"
+}
+VDF
+    printf '#!/bin/sh\n# The arm64 client'"'"'s %s, run natively (bannerlator-x64-arm-proton).\nexec "%s" /usr/local/bin/bannerlator-x64-arm-proton "%s" "$@"\n' \
+      "$name" "$X64_HOME/arm64/env" "$name" > "$dst/run"
+    chmod 755 "$dst/run"
+  done
+  # One library with the arm64 client: its library folders become this client's too, so a Windows
+  # game installed by either is installed for both. Titles this client runs as Linux builds (the
+  # DroidDeck direct ones) keep their own copy in its own folder - the arm64 client needs the
+  # Windows build of the same title. Written while no x86 client runs: it rewrites these on exit.
+  if ! pgrep -f 'steamrt64/steam( |$)' >/dev/null 2>&1; then
+    python3 - "$ARM_STEAM/config/libraryfolders.vdf" \
+      "$STEAM_X64/config/libraryfolders.vdf" "$STEAM_X64/steamapps/libraryfolders.vdf" <<'PY' || step "could not share the arm64 client's library folders"
+import os, re, sys
+src, dsts = sys.argv[1], sys.argv[2:]
+if not os.path.isfile(src):
+    sys.exit(0)
+want = re.findall(r'"path"\s*"([^"]+)"', open(src, encoding="utf-8", errors="replace").read())
+for dst in dsts:
+    if os.path.isfile(dst):
+        s = open(dst, encoding="utf-8", errors="surrogateescape").read()
+    else:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        s = '"libraryfolders"\n{\n}\n'
+    have = set(re.findall(r'"path"\s*"([^"]+)"', s))
+    nums = [int(n) for n in re.findall(r'^\t"(\d+)"\s*$', s, re.M)]
+    n = max(nums) + 1 if nums else 0
+    add = ""
+    for path in want:
+        if path in have:
+            continue
+        add += ('\t"%d"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"label"\t\t""\n\t\t"contentid"\t\t"0"\n'
+                '\t\t"totalsize"\t\t"0"\n\t\t"apps"\n\t\t{\n\t\t}\n\t}\n' % (n, path))
+        n += 1
+    if add:
+        end = s.rstrip().rfind("}")
+        s = s[:end] + add + s[end:]
+        open(dst, "w", encoding="utf-8", errors="surrogateescape").write(s)
+PY
+  fi
+  # Steam Play for every title not mapped otherwise: the arm64 client's own ARM64 Proton, so a
+  # shared install stays the Windows build the arm64 client also runs.
+  if [ -d "$STEAM_X64/compatibilitytools.d/bannerlator-proton-arm64" ] && [ -f "$STEAM_X64/config/config.vdf" ] &&
+     ! pgrep -f 'steamrt64/steam( |$)' >/dev/null 2>&1; then
+    python3 - "$STEAM_X64/config/config.vdf" <<'PY' || step "could not make ARM64 Proton the default"
+import re, sys
+path = sys.argv[1]
+s = open(path, encoding="utf-8", errors="surrogateescape").read()
+m = re.search(r'"CompatToolMapping"\s*\{', s)
+if not m:
+    sys.exit(0)
+depth, k = 1, m.end()
+while depth:
+    depth += s[k] == "{"
+    depth -= s[k] == "}"
+    k += 1
+if re.search(r'^\s*"0"\s*$', s[m.end():k], re.M):
+    sys.exit(0)
+entry = ('\n\t\t\t\t\t"0"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"bannerlator-proton-arm64"\n'
+         '\t\t\t\t\t\t"config"\t\t""\n\t\t\t\t\t\t"priority"\t\t"75"\n\t\t\t\t\t}')
+s = s[:m.end()] + entry + s[m.end():]
+open(path, "w", encoding="utf-8", errors="surrogateescape").write(s)
+PY
+  fi
   # A FEX process takes its rootfs from FEXServer, not from its own environment, and a server
   # started earlier without FEX_ROOTFS (any FEX run in this guest) answers with no rootfs at all:
   # every x86 library lookup then falls through to the arm64 guest. Stop it while no x86 client
@@ -308,6 +411,10 @@ x64_gpu() {
 
 # The environment the client and everything it starts run in.
 x64_env() {
+# The arm64 session's environment as it is now, for the arm64 Proton tools this client starts
+# (bannerlator-x64-arm-proton puts it back before Proton runs).
+export -p | grep -v -E '^declare -x (PWD|OLDPWD|SHLVL|_)=' > "$X64_HOME/arm-session.env.new" || true
+mv -f "$X64_HOME/arm-session.env.new" "$X64_HOME/arm-session.env"
 # The arm64 session's library paths and preloads are aarch64 and mean nothing to x86 processes.
 unset LD_LIBRARY_PATH LD_PRELOAD STEAM_RUNTIME STEAM_RUNTIME_PREFER_HOST_LIBRARIES
 # The client and its browser draw in software, as they always have: with the thunks the browser's
