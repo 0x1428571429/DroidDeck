@@ -260,6 +260,10 @@ case $mode in
     steam_x64=0
     [ "${BL_STEAM_CLIENT_ARCH:-}" = x86_64 ] && steam_x64=1
     if [ "$steam_x64" = 1 ]; then
+      # The arm64 client's own files are part of this one: its web helper draws the interface, and
+      # its game overlay and steamclient.so serve the arm64 Protons the x86-64 client starts.
+      step "checking the Steam client's arm64 parts (first run downloads them, ~1-2 min)"
+      bannerlator-steam-install || exit $?
       step "checking the x86-64 Steam client (FEX, experimental; the first run downloads ~2 GB)"
       bannerlator-steam-x64 --prepare || exit $?
       step "x86-64 Steam client ready"

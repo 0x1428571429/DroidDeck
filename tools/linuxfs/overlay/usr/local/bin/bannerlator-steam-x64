@@ -564,7 +564,8 @@ x64_exec() {
   # differs, for as long as this client runs: a full check puts the client's copy back.
   case "${1:-}" in
     -shutdown|steam://*) ;;
-    *) if [ "${BL_X64_X86_WEBHELPER:-0}" != 1 ] && [ -x /usr/local/bin/bannerlator-x64-arm-webhelper ]; then
+    *) if [ "${BL_X64_X86_WEBHELPER:-0}" != 1 ] && [ -x /usr/local/bin/bannerlator-x64-arm-webhelper ] &&
+          [ -x "$ARM_STEAM/steamrtarm64/steamwebhelper" ]; then
          (
            client=$$ wh=$STEAM_X64/steamrt64/steamwebhelper.sh
            base=$(printf '#!/bin/sh\nexec /usr/local/bin/bannerlator-x64-arm-webhelper "$@"\n#')
