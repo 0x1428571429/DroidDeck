@@ -209,8 +209,14 @@ cached() {
 
 if [[ -f "${repo_root}/tools/gamescope/release.env" ]]; then
     . "${repo_root}/tools/gamescope/release.env"
-    gamescope_archive=$(cached "${GAMESCOPE_SHA256}" gamescope.tzst \
-        bash -c 'gh release download "$0" -R "$1" -p gamescope.tzst -O "$out"' "${GAMESCOPE_TAG}" "${github_repo}")
+    if [[ -n "${DROIDDECK_GAMESCOPE_BUNDLE:-}" ]]; then
+        gamescope_archive=${DROIDDECK_GAMESCOPE_BUNDLE}
+        test -f "${gamescope_archive}"
+        echo "Using local Gamescope bundle: ${gamescope_archive}"
+    else
+        gamescope_archive=$(cached "${GAMESCOPE_SHA256}" gamescope.tzst \
+            bash -c 'gh release download "$0" -R "$1" -p gamescope.tzst -O "$out"' "${GAMESCOPE_TAG}" "${github_repo}")
+    fi
     zstd -dc "${gamescope_archive}" | tar -xf - -C "${linuxfs_dir}"
     test -f "${linuxfs_dir}/usr/local/bin/gamescope"
 fi
