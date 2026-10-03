@@ -600,7 +600,7 @@ def local_tools(steam_root):
     return names
 
 
-def register_default(config_path, apps=(), name=None, protect=()):
+def register_default(config_path, apps=(), name=None, protect=(), repointed=None):
     """Writes the mapping. `name` defaults to our own tool; the first-run seed passes Valve's.
     Returns the app ids given a per-app entry by this call."""
     tool = name or TOOL
@@ -628,6 +628,9 @@ def register_default(config_path, apps=(), name=None, protect=()):
             if (tokens[i] == '"name"' and named.startswith("proton")
                     and named != tool.lower() and named not in keep):
                 tokens[i + 1] = '"%s"' % tool
+                # The app the entry belongs to ("<appid>" { "name" ... }), for a caller that asks.
+                if repointed is not None and i >= 2 and tokens[i - 1] == "{" and tokens[i - 2] != '"0"':
+                    repointed.append(tokens[i - 2].strip('"'))
         if find_block(tokens[mapping + 1:], ["0"]) is None:
             tokens[mapping + 1:mapping + 1] = entry
         # The "0" default only decides how a title is installed, so it settles new downloads and
@@ -687,8 +690,15 @@ def main():
         # cannot start are repointed, to BL_COMPAT_TOOL.
         config = os.path.join(steam_root, "config", "config.vdf")
         if os.path.isfile(config):
-            register_default(config)
+            moved = []
+            register_default(config, repointed=moved)
             print("bannerlator-steam-compat: x86-64 client's Proton entries point at %s" % TOOL)
+            # As for the arm64 client (below): an entry changed while the client runs counts from
+            # its next start, so the session restarts it once the title has installed.
+            if moved and "--live" in sys.argv[2:]:
+                with open(os.path.join(os.path.expanduser("~"), ".bl-compat-pending"), "a") as f:
+                    f.write("".join("%s\n" % a for a in moved))
+                print("bannerlator-steam-compat: repointed while the client runs: %s" % " ".join(moved))
         return
     tools = os.path.join(steam_root, "compatibilitytools.d")
     os.makedirs(tools, exist_ok=True)

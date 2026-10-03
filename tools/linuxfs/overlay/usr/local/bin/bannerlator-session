@@ -553,7 +553,11 @@ case $mode in
     # reads from has changed since its last run - a new manifest, a new depot or tool, the client
     # rewriting config.vdf - which [ -nt ] answers without starting anything, and once a minute
     # regardless.
-    [ "$steam_x64" = 0 ] && (
+    # The x86-64 client: the same beat over both clients' libraries (it installs Windows titles into
+    # the arm64 client's), its compat pass the --x64 one (bannerlator-steam-compat).
+    _bl_beat_roots=("$steam_root")
+    [ "$steam_x64" = 1 ] && _bl_beat_roots+=("$XDG_DATA_HOME/Steam")
+    (
       beat=0
       compat_stamp=$HOME/.bl-compat-beat
       rm -f "$compat_stamp"
@@ -561,7 +565,8 @@ case $mode in
         local d
         [ -e "$compat_stamp" ] && [ "$((beat % 12))" -ne 0 ] || return 0
         for d in "$steam_root/steamapps" "$steam_root/steamapps/common" "$steam_root/config" \
-                 "$steam_root/compatibilitytools.d" /mnt/droiddeck-sd/steamapps; do
+                 "$steam_root/compatibilitytools.d" /mnt/droiddeck-sd/steamapps \
+                 "${_bl_beat_roots[@]/%//steamapps}"; do
           [ "$d" -nt "$compat_stamp" ] && return 0
         done
         return 1
@@ -583,9 +588,11 @@ case $mode in
         local app m flags
         while read -r app; do
           [ -n "$app" ] || continue
-          m="$steam_root/steamapps/appmanifest_$app.acf"
-          [ -f "$m" ] || m="/mnt/droiddeck-sd/steamapps/appmanifest_$app.acf"
-          [ -f "$m" ] || return 1
+          m=
+          for _r in "${_bl_beat_roots[@]}" /mnt/droiddeck-sd; do
+            [ -f "$_r/steamapps/appmanifest_$app.acf" ] && { m=$_r/steamapps/appmanifest_$app.acf; break; }
+          done
+          [ -n "$m" ] || return 1
           flags=$(sed -n 's/^[[:space:]]*"StateFlags"[[:space:]]*"\([0-9]*\)".*/\1/p' "$m" | head -n 1)
           [ "$flags" = 4 ] || return 1
         done < "$compat_pending"
@@ -595,10 +602,17 @@ case $mode in
         nap 5
         beat=$((beat + 1))
         [ "$((beat % 3))" -eq 0 ] || continue
-        bannerlator-seed-redists "$steam_root" >/dev/null 2>&1 || true
+        for _r in "${_bl_beat_roots[@]}"; do
+          bannerlator-seed-redists "$_r" >/dev/null 2>&1 || true
+        done
         if compat_due; then
           : > "$compat_stamp"
-          bannerlator-steam-compat "$steam_root" --live >/dev/null 2>&1 || true
+          if [ "$steam_x64" = 1 ]; then
+            [ -n "${_bl_x64_tool:-}" ] &&
+              BL_COMPAT_TOOL=$_bl_x64_tool bannerlator-steam-compat "$steam_root" --x64 --live >/dev/null 2>&1 || true
+          else
+            bannerlator-steam-compat "$steam_root" --live >/dev/null 2>&1 || true
+          fi
         fi
         if [ -s "$compat_pending" ] && compat_settled; then
           _bl_new=$(sort -u "$compat_pending" | grep -vxF -f "$compat_restarted" || true)
@@ -846,8 +860,12 @@ BUSCONF
       rc=$?
       echo "== steam exited rc=$rc"
       collect_steam_logs
-      if [ "$steam_x64" = 0 ] && [ -n "${BL_ADDED_GAMES:-}" ] && [ -f "$BL_ADDED_GAMES" ]; then
-        bannerlator-steam-shortcuts "$steam_root" "$BL_ADDED_GAMES" || true
+      if [ -n "${BL_ADDED_GAMES:-}" ] && [ -f "$BL_ADDED_GAMES" ]; then
+        if [ "$steam_x64" = 0 ]; then
+          bannerlator-steam-shortcuts "$steam_root" "$BL_ADDED_GAMES" || true
+        elif [ -n "${_bl_x64_tool:-}" ]; then
+          BL_COMPAT_TOOL=$_bl_x64_tool bannerlator-steam-shortcuts "$steam_root" "$BL_ADDED_GAMES" || true
+        fi
       fi
       if [ -f "$HOME/.bl-stop-requested" ]; then
         rm -f "$HOME/.bl-stop-requested" "$HOME/.bl-restart-once"
