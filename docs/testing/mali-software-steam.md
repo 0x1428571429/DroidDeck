@@ -35,6 +35,13 @@ The desktop path can also use the software Steam settings. On the tested G52 dev
 
 ## Device validation
 
-Testing is in progress on the wired Unisoc T618 / Mali-G52 MC2 device (`RGB05001607258`, Android 12, kernel 5.4, 4 KiB pages). The desktop and desktop Steam QR screen have been observed. Gamescope acceptance and the native artifact identity will be recorded after the patched build is tested.
+Validated 2026-10-03 on the wired Unisoc T618 / Mali-G52 MC2 device (`RGB05001607258`, Android 12, kernel 5.4, 4 KiB pages). **Steam → Play Steam reaches the Big Picture QR sign-in screen inside Gamescope with only `BL_STEAM_SOFTWARE=1`.** The selected Deck mode was retained: the client command includes `-gamepadui -steamdeck -steamos3`. A test string was entered and cleared in the account field without submitting it; no account was signed in. The desktop and desktop Steam QR screen also worked in the earlier test.
+
+- Native bundle SHA-256: `22df550d60fcd62e351790eb775ee857e037fcd49fcc23a5bfa4638377e6b4b7`; the installed Gamescope binary matches the bundle (`41a067202e94af16b6f09b819208450e667dcc709480a2b97405d59a0e93cb69`).
+- Signed debug APK SHA-256: `7a19928dc93e72c81b553c62515f3881a249eb037a81fbb6296e05bb9edd23b3`, built from commit `e427c08` using the ordinary artifact-pin path.
+- Device logs: `Download/DroidDeck/2026-10-03-10-steam/`. They identify Lavapipe, SDL swapchain creation, timer pacing, and the outer window `Steam Big Picture Mode` drawing through the system Mali-G52 presenter.
+- The native ARM build, full local Android build, bundle checksum, installed binary identity, shell syntax, workflow YAML, and diff checks passed. App data and the primary checkout were preserved.
+
+The shared-memory commit fixes are both needed: without a ready fence, commits never display; with the old buffer memoization, a reused buffer keeps displaying its first copied pixels (the boot logo or black) despite ongoing frame delivery. Refreshing the copy also makes the account-field edits visible.
 
 A guest glibc Mali ICD and compatible image transport remain necessary for hardware acceleration. This patch does not install Steam-ARM's feature layers, prove Proton/DXVK support, or validate other Mali generations. The Android presenter also caps its requested Vulkan API to the loader's supported version and withholds dma-buf advertisement when the complete import extension set is missing; that missing-extension branch has not been exercised on this G52 driver.
