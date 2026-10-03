@@ -27,8 +27,9 @@ Desktop Steam can also use this mode on a pixman desktop.
 The optional present timing, local texture allocation, SHM refresh and ready
 fence handling in the new Gamescope patches apply only in this mode. Normal
 sessions retain the original dma-buf, buffer-cache and presentation paths.
-The Android presenter requests at most its loader's Vulkan API (minimum 1.1)
-and advertises dma-buf import only when the complete extension set is available.
+The Android presenter lowers its 1.3 request when the loader positively reports
+an older usable API. Custom ICDs that cannot report a version retain the original
+request. Dma-buf import is advertised only with the complete extension set.
 
 ## Validation
 
@@ -44,6 +45,8 @@ workflow permission.
 Local validation passed all 121 JVM tests and the macOS-applicable Python tests
 (62 discovered, 13 Linux-only skipped). The corrected native build passed
 [run 37161255955](https://github.com/Droid-Deck/DroidDeck/actions/runs/37161255955).
+The final code's APK build, Python and JVM tests, and native dependency closure
+check passed [run 37162182731](https://github.com/Droid-Deck/DroidDeck/actions/runs/37162182731).
 The installed Gamescope binary matches the component's contents
 (`2c92c155f7836a798c2a04eb1db5779e149680fcce888cd9a1ebe3fef7e5a2af`).
 
