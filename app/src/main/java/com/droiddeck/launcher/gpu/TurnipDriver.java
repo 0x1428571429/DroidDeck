@@ -24,11 +24,12 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * The Vulkan driver the in-app compositor runs on. It has to be Turnip: the system Adreno driver
+ * The Vulkan driver the in-app compositor runs on. Adreno needs Turnip: its system driver
  * does not implement VK_EXT_image_drm_format_modifier, so importing the dma-bufs gamescope hands
  * over fails and the session renders nothing. Two builds ship in the apk, one per Adreno
  * generation, and the GPU decides which is unpacked - unless the user has imported an AdrenoTools
- * zip of their own and chosen it, which then wins.
+ * zip of their own and chosen it, which then wins. A positively identified Mali kbase GPU
+ * instead uses system Vulkan for shared-memory presentation; this does not supply a Linux ICD.
  *
  * <p>The guest's own Turnip is a different copy entirely - a glibc build inside the rootfs, or an
  * imported one ({@link LinuxVulkanDriverManager}). This one is the bionic build the app process

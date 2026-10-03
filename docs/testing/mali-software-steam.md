@@ -37,6 +37,15 @@ launcher with a capturing Gamescope executable: default accelerated backend,
 custom-driver selection, software-only activation, precedence, overlay, HDR,
 refresh rate and argument preservation. The native component is built against
 all existing patches and checked against the runtime's shared-library list.
+`gamescope-3.16.29-p6` is a versioned component release; the existing release
+download/checksum path is unchanged. There is no CI artifact pin or extra build
+workflow permission.
+
+Local validation passed all 121 JVM tests and the macOS-applicable Python tests
+(62 discovered, 13 Linux-only skipped). The corrected native build passed
+[run 37161255955](https://github.com/Droid-Deck/DroidDeck/actions/runs/37161255955).
+The installed Gamescope binary matches the component's contents
+(`2c92c155f7836a798c2a04eb1db5779e149680fcce888cd9a1ebe3fef7e5a2af`).
 
 Earlier experiment validation on the wired Unisoc T618 / Mali-G52 MC2 device
 (Android 12, kbase JM 11.31) reached Steam Big Picture sign-in and downloaded
