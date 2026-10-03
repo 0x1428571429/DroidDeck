@@ -35,7 +35,7 @@ The desktop path can also use the software Steam settings. On the tested G52 dev
 
 ## Device validation
 
-Validated 2026-10-03 on the wired Unisoc T618 / Mali-G52 MC2 device (`RGB05001607258`, Android 12, kernel 5.4, 4 KiB pages). **Steam → Play Steam reaches the Big Picture QR sign-in screen inside Gamescope with only `BL_STEAM_SOFTWARE=1`.** The selected Deck mode was retained: the client command includes `-gamepadui -steamdeck -steamos3`. A test string was entered and cleared in the account field without submitting it; no account was signed in. The desktop and desktop Steam QR screen also worked in the earlier test.
+Validated 2026-10-03 on the wired Unisoc T618 / Mali-G52 MC2 device (`RGB05001607258`, Android 12, kernel 5.4, 4 KiB pages). **Steam → Play Steam reaches the Big Picture QR sign-in screen inside Gamescope with only `BL_STEAM_SOFTWARE=1`.** The selected Deck mode was retained: the client command includes `-gamepadui -steamdeck -steamos3`. A test string was entered and cleared in the account field without submitting it; no account was signed in during that initial test. The desktop and desktop Steam QR screen also worked in the earlier test.
 
 - Native bundle SHA-256: `22df550d60fcd62e351790eb775ee857e037fcd49fcc23a5bfa4638377e6b4b7`; the installed Gamescope binary matches the bundle (`41a067202e94af16b6f09b819208450e667dcc709480a2b97405d59a0e93cb69`).
 - Signed debug APK SHA-256: `7a19928dc93e72c81b553c62515f3881a249eb037a81fbb6296e05bb9edd23b3`, built from commit `e427c08` using the ordinary artifact-pin path.
@@ -44,4 +44,20 @@ Validated 2026-10-03 on the wired Unisoc T618 / Mali-G52 MC2 device (`RGB0500160
 
 The shared-memory commit fixes are both needed: without a ready fence, commits never display; with the old buffer memoization, a reused buffer keeps displaying its first copied pixels (the boot logo or black) despite ongoing frame delivery. Refreshing the copy also makes the account-field edits visible.
 
-A guest glibc Mali ICD and compatible image transport remain necessary for hardware acceleration. This patch does not install Steam-ARM's feature layers, prove Proton/DXVK support, or validate other Mali generations. The Android presenter also caps its requested Vulkan API to the loader's supported version and withholds dma-buf advertisement when the complete import extension set is missing; that missing-extension branch has not been exercised on this G52 driver.
+## Geometry Wars gameplay follow-up
+
+After the user signed in, Geometry Wars: Retro Evolved (`8400`) was downloaded through the native Steam client on the same device and APK. Steam verified all seven files (66,019,943 bytes, build `251921`, depot `8401`). The first install confirmation crashed Steam with exit 139 while it queued additional compatibility runtimes. Restarting the session retained the install request; the download then completed successfully. The cause of that client crash is unverified.
+
+The game launches through `bannerlator-proton-arm64` using the installed Proton Experimental (ARM64), Wine and DXVK, with the guest still using Lavapipe. It reached the animated menu and an active round; the on-screen A button starts a round, the left stick moves the ship, the right stick fires in different directions, and Start pauses it.
+
+The first run was cropped and repeatedly recreated its swapchain. Turning off **Stretch games to fill** did not resolve the cropping. A game-specific Steam launch option did:
+
+```sh
+DISABLE_GAMESCOPE_WSI=1 %command%
+```
+
+That disables the Vulkan Xwayland-bypass layer for the game while keeping the outer Gamescope session. The subsequent menu and gameplay show the whole 4:3 image, including the high-score column and all menu entries. Fullscreen stretching remains off on the test device, and on-screen controls are set to **Always**. These are runtime settings; the branch does not automatically apply this per-game workaround.
+
+The Android presenter reported roughly 3–5 displayed frames per second in representative gameplay samples. Movement and shooting work, but CPU-rendered performance is insufficient for normal play. Audio was not verified. The game was left paused with scrcpy running. Follow-up logs are in `Download/DroidDeck/2026-10-03-11-steam/`; screenshots and raw logs are retained locally, outside Git.
+
+A guest glibc Mali ICD and compatible image transport remain necessary for hardware acceleration. This patch does not install Steam-ARM's feature layers or validate other Mali generations; the gameplay result establishes one Windows D3D9 title through software rendering, not general Proton/DXVK compatibility. The Android presenter also caps its requested Vulkan API to the loader's supported version and withholds dma-buf advertisement when the complete import extension set is missing; that missing-extension branch has not been exercised on this G52 driver.
