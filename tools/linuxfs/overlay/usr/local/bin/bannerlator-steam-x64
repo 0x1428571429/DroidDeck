@@ -21,6 +21,7 @@ FEX_TAG=fex-2609-r3
 FEX_SHA256=cf3a87805ec51f8c42e197ff4883575e5bdec5247abe4c0beefb1796db358b5f
 FEX_URL=https://github.com/Droid-Deck/DroidDeck/releases/download/$FEX_TAG/fex.tzst
 ROOTFS_URL=https://rootfs.fex-emu.gg/Ubuntu_24_04/2026-08-11/Ubuntu_24_04.sqsh
+ROOTFS_SHA256=2854b06d3ff1b8f6e526135bfb6dd5b7b30ab3ab73e79ae933a3d9fed959a178
 CDN=https://client-update.fastly.steamstatic.com
 MANIFEST=steam_client_publicbeta_ubuntu12
 
@@ -54,6 +55,9 @@ if [ ! -f "$ROOTFS/.droiddeck-complete" ]; then
     rc=$?
     [ "$rc" = 22 ] && [ -s "$X64_HOME/rootfs.sqsh" ] || { step "rootfs download failed (curl $rc)"; exit 1; }
   }
+  if ! echo "$ROOTFS_SHA256  $X64_HOME/rootfs.sqsh" | sha256sum -c --quiet >/dev/null 2>&1; then
+    rm -f "$X64_HOME/rootfs.sqsh"; step "rootfs download did not match its checksum; try again"; exit 1
+  fi
   step "unpacking the rootfs"
   rm -rf "$ROOTFS"
   # Ownership and xattrs mean nothing in this guest; device nodes cannot be made here and are not
