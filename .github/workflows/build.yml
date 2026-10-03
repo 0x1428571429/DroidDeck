@@ -18,6 +18,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   pull-requests: write
 
@@ -190,7 +191,13 @@ jobs:
           done
           if [ -f tools/gamescope/release.env ]; then
             . tools/gamescope/release.env
-            gh release download "${GAMESCOPE_TAG}" -R "${GITHUB_REPOSITORY}" -p gamescope.tzst -O gamescope.tzst
+            if [ -n "${GAMESCOPE_ARTIFACT_RUN:-}" ]; then
+              gh run download "${GAMESCOPE_ARTIFACT_RUN}" -R "${GITHUB_REPOSITORY}" -n gamescope-patched -D gamescope-artifact
+              mv gamescope-artifact/gamescope.tzst gamescope.tzst
+              rm -r gamescope-artifact
+            else
+              gh release download "${GAMESCOPE_TAG}" -R "${GITHUB_REPOSITORY}" -p gamescope.tzst -O gamescope.tzst
+            fi
             echo "${GAMESCOPE_SHA256}  gamescope.tzst" | sha256sum -c -
             tar --use-compress-program=unzstd -xf gamescope.tzst -C "$D"
             test -f "$D/usr/local/bin/gamescope"

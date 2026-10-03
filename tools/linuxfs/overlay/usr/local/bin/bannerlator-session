@@ -655,8 +655,8 @@ BUSCONF
     # desktop's launchers ask for; gamescope shows one window at a time and the game takes over.
     _bl_ui=(-gamepadui)
     [ "${BL_STEAM_UI:-}" = desktop ] && _bl_ui=()
-    # A diagnostic client on a pixman desktop: CEF uses CPU frames through Xwayland.
-    # This does not give games a Vulkan device or make Gamescope work on this GPU.
+    # Software compatibility mode: CEF and Steam use CPU frames through Xwayland,
+    # inside either the desktop or the software Gamescope session.
     _bl_cef=(-cef-force-gpu -cef-use-gl=angle -cef-use-angle=vulkan)
     if [ "${BL_STEAM_SOFTWARE:-0}" = 1 ]; then
       _bl_cef=(-cef-disable-gpu -cef-disable-gpu-compositing)

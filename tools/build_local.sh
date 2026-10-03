@@ -207,12 +207,25 @@ cached() {
     echo "${out}"
 }
 
+# Experimental branches can pin a CI artifact until their native component is released.
+download_gamescope_artifact() (
+    set -e
+    local artifact_dir
+    artifact_dir=$(mktemp -d)
+    trap 'rm -rf "$artifact_dir"' EXIT
+    gh run download "$1" -R "$2" -n gamescope-patched -D "$artifact_dir"
+    cp "$artifact_dir/gamescope.tzst" "$out"
+)
+
 if [[ -f "${repo_root}/tools/gamescope/release.env" ]]; then
     . "${repo_root}/tools/gamescope/release.env"
     if [[ -n "${DROIDDECK_GAMESCOPE_BUNDLE:-}" ]]; then
         gamescope_archive=${DROIDDECK_GAMESCOPE_BUNDLE}
         test -f "${gamescope_archive}"
         echo "Using local Gamescope bundle: ${gamescope_archive}"
+    elif [[ -n "${GAMESCOPE_ARTIFACT_RUN:-}" ]]; then
+        gamescope_archive=$(cached "${GAMESCOPE_SHA256}" gamescope.tzst \
+            download_gamescope_artifact "${GAMESCOPE_ARTIFACT_RUN}" "${github_repo}")
     else
         gamescope_archive=$(cached "${GAMESCOPE_SHA256}" gamescope.tzst \
             bash -c 'gh release download "$0" -R "$1" -p gamescope.tzst -O "$out"' "${GAMESCOPE_TAG}" "${github_repo}")
