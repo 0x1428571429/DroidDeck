@@ -372,13 +372,22 @@ for dst in dsts:
         open(dst, "w", encoding="utf-8", errors="surrogateescape").write(s)
 PY
   fi
-  # Steam Play for every title not mapped otherwise: the arm64 client's own ARM64 Proton (its wrapper,
-  # bannerlator-proton-a64), so a shared install stays the Windows build the arm64 client also runs.
-  if [ -d "$STEAM_X64/compatibilitytools.d/bannerlator-proton-arm64" ] && [ -f "$STEAM_X64/config/config.vdf" ] &&
+  # Steam Play for every title not mapped otherwise: one of the arm64 client's own ARM64 Protons, so a
+  # shared install stays the Windows build the arm64 client also runs. The newest GE-Proton first:
+  # with bannerlator-proton-arm64 (Proton Experimental) Xwayland never got its window buffers back
+  # and FlatOut took the device's RAM with it (10.5 GB of dma-buf in 35 s); GE-Proton, same game,
+  # same client, stayed flat. bannerlator-proton-a64 when no GE-Proton is installed.
+  default=
+  for d in $(ls -d "$STEAM_X64"/compatibilitytools.d/GE-Proton*-aarch64 2>/dev/null | sort -V -r); do
+    [ -f "$d/.droiddeck-arm64-proton" ] && { default=$d; break; }
+  done
+  [ -n "$default" ] || default=$STEAM_X64/compatibilitytools.d/bannerlator-proton-arm64
+  if [ -f "$default/compatibilitytool.vdf" ] && [ -f "$STEAM_X64/config/config.vdf" ] &&
      ! pgrep -f 'steamrt64/steam( |$)' >/dev/null 2>&1; then
-    python3 - "$STEAM_X64/config/config.vdf" <<'PY' || step "could not make ARM64 Proton the default"
+    python3 - "$STEAM_X64/config/config.vdf" "$default/compatibilitytool.vdf" <<'PY' || step "could not make ARM64 Proton the default"
 import re, sys
 path = sys.argv[1]
+tool = re.search(r'"compat_tools"\s*\{\s*"([^"]+)"', open(sys.argv[2]).read()).group(1)
 s = open(path, encoding="utf-8", errors="surrogateescape").read()
 m = re.search(r'"CompatToolMapping"\s*\{', s)
 if not m:
@@ -391,11 +400,16 @@ while depth:
 block = s[m.end():k]
 z = re.search(r'^\s*"0"\s*\{([^{}]*)\}', block, re.M)
 if z:
-    # Kept when the user chose another default; replaced when it names a tool this client ignores.
-    if "arm64" not in z.group(1):
+    # Kept when the user chose another default; replaced when it names a tool this client ignores,
+    # or is the earlier default this script set (bannerlator-proton-a64 at priority 75).
+    ours = re.search(r'"name"\s*"bannerlator-proton-a64"', z.group(1)) and \
+        re.search(r'"priority"\s*"75"', z.group(1))
+    if "arm64" not in z.group(1) and not ours:
+        sys.exit(0)
+    if re.search(r'"name"\s*"%s"' % re.escape(tool), z.group(1)):
         sys.exit(0)
     s = s[:m.end() + z.start()] + s[m.end() + z.end():]
-entry = ('\n\t\t\t\t\t"0"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"bannerlator-proton-a64"\n'
+entry = ('\n\t\t\t\t\t"0"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"%s"\n' % tool +
          '\t\t\t\t\t\t"config"\t\t""\n\t\t\t\t\t\t"priority"\t\t"75"\n\t\t\t\t\t}')
 s = s[:m.end()] + entry + s[m.end():]
 open(path, "w", encoding="utf-8", errors="surrogateescape").write(s)
