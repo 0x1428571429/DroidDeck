@@ -127,7 +127,7 @@ index 54e4efc..4777f7c 100644
  		std::thread present_wait_thread( present_wait_thread_func );
  		present_wait_thread.detach();
 diff --git a/src/rendervulkan.hpp b/src/rendervulkan.hpp
-index fa519db..8c82013 100644
+index fa519db..a784c29 100644
 --- a/src/rendervulkan.hpp
 +++ b/src/rendervulkan.hpp
 @@ -20,6 +20,8 @@
@@ -147,18 +147,7 @@ index fa519db..8c82013 100644
  	inline bool hasDrmPrimaryDevId() {return m_bHasDrmPrimaryDevId;}
  	inline dev_t primaryDevId() {return m_drmPrimaryDevId;}
  	inline bool supportsFp16() {return m_bSupportsFp16;}
-@@ -896,7 +899,9 @@ public:
- 	void resetCmdBuffers(uint64_t sequence);
- 
- protected:
--	friend class CVulkanCmdBuffer;
-+	friend extern const bool g_bSoftwareCompat;
-+
-+class CVulkanCmdBuffer;
- 
- 	bool selectPhysDev(VkSurfaceKHR surface);
- 	bool createDevice();
-@@ -930,6 +935,7 @@ protected:
+@@ -930,6 +933,7 @@ protected:
  	uint32_t m_uVendorID = 0;
  	bool m_bHasDrmPrimaryDevId = false;
  	bool m_bSupportsModifiers = false;
