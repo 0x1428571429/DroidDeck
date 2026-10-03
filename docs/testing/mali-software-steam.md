@@ -61,3 +61,12 @@ That disables the Vulkan Xwayland-bypass layer for the game while keeping the ou
 The Android presenter reported roughly 3–5 displayed frames per second in representative gameplay samples. Movement and shooting work, but CPU-rendered performance is insufficient for normal play. Audio was not verified. The game was left paused with scrcpy running. Follow-up logs are in `Download/DroidDeck/2026-10-03-11-steam/`; screenshots and raw logs are retained locally, outside Git.
 
 A guest glibc Mali ICD and compatible image transport remain necessary for hardware acceleration. This patch does not install Steam-ARM's feature layers or validate other Mali generations; the gameplay result establishes one Windows D3D9 title through software rendering, not general Proton/DXVK compatibility. The Android presenter also caps its requested Vulkan API to the loader's supported version and withholds dma-buf advertisement when the complete import extension set is missing; that missing-extension branch has not been exercised on this G52 driver.
+
+## GPU acceleration follow-up
+
+The [kbase/JM driver lab](../../tools/panvk/README.md) now includes a pinned
+source build and three fixes validated on this wired G52. GPU compute,
+offscreen draw/readback, indexed draw and visible VKCube presentation work.
+Geometry Wars remains blocked: the bundled DXVK requires an unsupported
+feature, while an isolated older DXVK reaches rendering and loses the GPU
+device. The software Steam/Gamescope settings remain the recovery path.

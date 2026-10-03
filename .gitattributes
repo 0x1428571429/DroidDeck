@@ -1,2 +1,3 @@
 # Patch context includes the indentation and blank lines of the source being patched.
 tools/gamescope/patches/*.patch -whitespace
+tools/panvk/patches/*.patch -whitespace
