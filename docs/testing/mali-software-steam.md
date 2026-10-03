@@ -47,6 +47,14 @@ Local validation passed all 121 JVM tests and the macOS-applicable Python tests
 The installed Gamescope binary matches the component's contents
 (`2c92c155f7836a798c2a04eb1db5779e149680fcce888cd9a1ebe3fef7e5a2af`).
 
+The cleanup build was installed in place on the wired Mali device using the
+release-signed debug APK. Automatic selection logged the positive Mali kbase
+identification, and Steam Big Picture reached the logged-in home screen through
+the new software-compatible Gamescope. Animated frames and input worked. A
+Geometry Wars retest stalled during Wine prefix startup; successful gameplay
+below belongs to the earlier experiment, not this cleanup validation. No
+physical Adreno device was updated during this cleanup.
+
 Earlier experiment validation on the wired Unisoc T618 / Mali-G52 MC2 device
 (Android 12, kbase JM 11.31) reached Steam Big Picture sign-in and downloaded
 Geometry Wars: Retro Evolved. Its software-rendered menu, movement, shooting and
