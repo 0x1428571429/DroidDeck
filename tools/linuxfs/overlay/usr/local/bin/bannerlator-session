@@ -760,13 +760,12 @@ BUSCONF
     # is an update that never installs: exit 42, a restart, for ever (Bannerlator 38996ea1). The
     # loop below puts package/beta back before every start. The SteamOS helpers the client calls
     # in this mode are staged as no-op stubs under /usr/bin.
-    # Not for the x86-64 client yet: with -steamos3 its SteamOS audio manager aborts on this runtime's
-    # PulseAudio 13 server (pa_operation_get_state assertion) right after start. Big Picture without
-    # the Deck flags runs.
-    # BL_X64_DECK=1 tries it with the x86-64 client: the session preload answers libpulse's missing
-    # operation there (preload/pulseguard.c).
+    # The x86-64 client too: with -steamos3 its SteamOS audio manager hands libpulse an operation a
+    # failed request never returned, and libpulse aborted the client right after start; the session
+    # preload answers it (preload/pulseguard.c). Device: Deck mode, logged on, 140 fps menus.
+    # BL_X64_DECK=0 starts the x86-64 client without the Deck flags.
     if [ "${BL_STEAMDECK:-0}" = 1 ] && [ "${BL_STEAM_UI:-}" != desktop ] &&
-       { [ "$steam_x64" = 0 ] || [ "${BL_X64_DECK:-0}" = 1 ]; }; then
+       { [ "$steam_x64" = 0 ] || [ "${BL_X64_DECK:-1}" != 0 ]; }; then
       _bl_ui+=(-steamdeck -steamos3)
       # The QAM's Scaling Filter lists NVIDIA Image Scaling only when told gamescope has it (it does).
       export STEAM_GAMESCOPE_NIS_SUPPORTED=1
