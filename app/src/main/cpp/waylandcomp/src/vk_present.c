@@ -40,6 +40,7 @@ struct vkp_image {
 static ANativeWindow *g_window;  /* the window frames go to; compositor thread only */
 static char *g_driver_path, *g_library_name, *g_native_lib_dir;
 static int g_dev_state;       /* 0 = not yet, 1 = ok, -1 = failed, -2 = lost (VK_ERROR_DEVICE_LOST) */
+static int g_dmabuf_import;
 static VkInstance g_inst;
 static VkPhysicalDevice g_pd;
 static VkDevice g_dev;
@@ -411,11 +412,13 @@ static int dev_init(void) {
                    "generation %s)", g_colorspace_ext ? "enables" : "has no",
                    g_colorspace_ext ? "is possible where the screen surface offers one" : "is not possible: tone-mapped instead");
     }
-    /* 1.3 like the X11 renderer's instance: the frame-generation probe (framegen_engine.cpp)
-     * queries VkPhysicalDeviceVulkan12Features, and a 1.1 instance may be answered as 1.1. */
+    /* Prefer 1.3 for the frame-generation feature probe, but respect older system loaders. */
+    uint32_t loader_api = VK_API_VERSION_1_0;
+    if (g_vk.EnumerateInstanceVersion)
+        g_vk.EnumerateInstanceVersion(&loader_api);
     VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
                              .pApplicationName = "banner-wayland-present",
-                             .apiVersion = VK_API_VERSION_1_3};
+                             .apiVersion = loader_api < VK_API_VERSION_1_3 ? loader_api : VK_API_VERSION_1_3};
     VkInstanceCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
                                 .pApplicationInfo = &app,
                                 .enabledExtensionCount = n_inst_exts,
@@ -450,18 +453,25 @@ static int dev_init(void) {
     }
     g_vk.GetPhysicalDeviceMemoryProperties(g_pd, &g_memprops);
 
-    /* Verify the dmabuf-import extensions are present, and log any that are missing. */
-    const char *dev_exts[7] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, "VK_KHR_external_memory_fd",
-                               "VK_EXT_external_memory_dma_buf", "VK_EXT_image_drm_format_modifier",
-                               "VK_KHR_image_format_list", NULL, NULL};
-    uint32_t n_dev_exts = 5;
+    /* Shared-memory clients need only a swapchain. Advertise dma-buf import only when its
+     * complete extension set is available, rather than failing device creation on older GPUs. */
+    const char *import_exts[] = {"VK_KHR_external_memory_fd", "VK_EXT_external_memory_dma_buf",
+                                "VK_EXT_image_drm_format_modifier", "VK_KHR_image_format_list"};
+    const char *dev_exts[7] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    uint32_t n_dev_exts = 1;
     uint32_t ne = 0;
     g_vk.EnumerateDeviceExtensionProperties(g_pd, NULL, &ne, NULL);
     VkExtensionProperties *exts = calloc(ne ? ne : 1, sizeof(*exts));
     g_vk.EnumerateDeviceExtensionProperties(g_pd, NULL, &ne, exts);
-    for (unsigned i = 0; i < 5; i++)
-        if (!has_ext(exts, ne, dev_exts[i]))
-            LOGE("present: driver MISSING %s (dmabuf import will fail)", dev_exts[i]);
+    g_dmabuf_import = 1;
+    for (unsigned i = 0; i < sizeof(import_exts) / sizeof(import_exts[0]); i++) {
+        if (has_ext(exts, ne, import_exts[i]))
+            dev_exts[n_dev_exts++] = import_exts[i];
+        else {
+            g_dmabuf_import = 0;
+            banner_log("gpu", "driver has no %s; shared-memory clients remain available", import_exts[i]);
+        }
+    }
     /* HDR sessions only: the HDR10 swapchain (frame generation) can carry the game's metadata. */
     int want_hdr_md = 0;
     if (banner_color_requested()) {
@@ -538,6 +548,7 @@ static int dev_init(void) {
 }
 
 int vkp_ready(void) { return dev_init(); }
+int vkp_dmabuf_supported(void) { return dev_init() == 0 && g_dmabuf_import; }
 
 static int swap_init_locked(void);
 
@@ -899,7 +910,7 @@ static int modifier_importable(VkFormat fmt, uint64_t modifier, VkImageUsageFlag
 }
 
 int vkp_dmabuf_modifiers(uint32_t drm_format, uint64_t *out, int max) {
-    if (max <= 0 || dev_init() != 0 || !g_vk.GetPhysicalDeviceFormatProperties2) return 0;
+    if (max <= 0 || !vkp_dmabuf_supported() || !g_vk.GetPhysicalDeviceFormatProperties2) return 0;
     VkFormat fmt = drm_to_vk(drm_format);
     VkDrmFormatModifierPropertiesListEXT list = {
         .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT};
@@ -941,7 +952,7 @@ int vkp_image_is_dmabuf(const struct vkp_image *img) { return img && img->dmabuf
 struct vkp_image *vkp_image_import_dmabuf(int fd, uint32_t drm_format, uint64_t modifier, int w, int h,
                                           uint32_t stride, uint32_t offset, int as_blit_dst) {
     if (modifier == MOD_INVALID || w <= 0 || h <= 0) return NULL;
-    if (dev_init() != 0) return NULL;
+    if (!vkp_dmabuf_supported()) return NULL;
 
     struct vkp_image *img = calloc(1, sizeof(*img));
     if (!img) return NULL;

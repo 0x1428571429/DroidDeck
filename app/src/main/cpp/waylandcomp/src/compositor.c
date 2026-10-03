@@ -3478,7 +3478,8 @@ int banner_wayland_run(void) {
     /* libdecor binds wl_output at 4; a lower version is a protocol error for the client. */
     wl_global_create(display, &wl_output_interface, 4, NULL, bind_output);
     wl_global_create(display, &xdg_wm_base_interface, 1, NULL, bind_xdg_wm_base);
-    wl_global_create(display, &zwp_linux_dmabuf_v1_interface, 4, NULL, bind_dmabuf);
+    if (vkp_dmabuf_supported())
+        wl_global_create(display, &zwp_linux_dmabuf_v1_interface, 4, NULL, bind_dmabuf);
     /* gamescope's Wayland backend refuses a seat older than 8. */
     wl_global_create(display, &wl_seat_interface, 9, NULL, bind_seat);
     wl_global_create(display, &banner_desktop_v1_interface, 1, NULL, bind_desktop);

@@ -9,7 +9,7 @@
 #define VK_USE_PLATFORM_ANDROID_KHR
 #include <vulkan/vulkan.h>
 
-#define VK_GLOBAL_FUNCS(X) X(CreateInstance) X(EnumerateInstanceExtensionProperties)
+#define VK_GLOBAL_FUNCS(X) X(CreateInstance) X(EnumerateInstanceExtensionProperties) X(EnumerateInstanceVersion)
 
 #define VK_INSTANCE_FUNCS(X) \
     X(EnumeratePhysicalDevices) X(GetPhysicalDeviceProperties) \

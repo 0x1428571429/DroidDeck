@@ -337,6 +337,10 @@ public final class TurnipDriver {
             if (forced.startsWith("a8")) return DRIVER_A8XX;
             if (forced.startsWith("a7")) return DRIVER_A7XX;
         }
+        if (!com.droiddeck.launcher.core.DeviceSupport.INSTANCE.adreno()) {
+            Log.i(TAG, "non-Adreno GPU: using system Vulkan for the compositor");
+            return null;
+        }
         String model = gpuModel();
         Log.i(TAG, "gpu model: " + (model == null ? "unknown" : model));
         if (model != null) {

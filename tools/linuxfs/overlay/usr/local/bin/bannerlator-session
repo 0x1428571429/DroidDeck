@@ -639,6 +639,15 @@ BUSCONF
     # desktop's launchers ask for; gamescope shows one window at a time and the game takes over.
     _bl_ui=(-gamepadui)
     [ "${BL_STEAM_UI:-}" = desktop ] && _bl_ui=()
+    # A diagnostic client on a pixman desktop: CEF uses CPU frames through Xwayland.
+    # This does not give games a Vulkan device or make Gamescope work on this GPU.
+    _bl_cef=(-cef-force-gpu -cef-use-gl=angle -cef-use-angle=vulkan)
+    if [ "${BL_STEAM_SOFTWARE:-0}" = 1 ]; then
+      _bl_cef=(-cef-disable-gpu -cef-disable-gpu-compositing)
+      export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe
+      export MESA_LOADER_DRIVER_OVERRIDE=swrast SDL_RENDER_DRIVER=software SDL_VIDEODRIVER=x11
+      echo "== steam: software rendering requested"
+    fi
     # Deck mode (BL_STEAMDECK=1, the Steam page's Client settings): -steamdeck is the flag that puts
     # the Quick Access Menu and the Deck settings pages on screen; the QAM's performance overlay
     # controls stay greyed out without -steamos3, as SteamOS and Armada launch it. -steamos3 makes
@@ -698,7 +707,7 @@ BUSCONF
         done
       ) &
     fi
-    echo "== steam args: ${_bl_ui[*]} -clientbeta $steam_channel -no-cef-sandbox -cef-force-gpu -cef-ozone-platform=x11 -cef-use-gl=angle -cef-use-angle=vulkan $*"
+    echo "== steam args: ${_bl_ui[*]} -clientbeta $steam_channel -no-cef-sandbox -cef-ozone-platform=x11 ${_bl_cef[*]} $*"
     # An update that cannot install asks for a restart (rc=42) every time; the count is capped so a
     # session can never again loop in silence, which reads as a menu opening and closing by itself.
     steam_updates=0
@@ -745,8 +754,7 @@ BUSCONF
       fi
       step "starting the Steam client${BL_STEAM_UI:+ ($BL_STEAM_UI UI)}"
       "$steam_root/steamrtarm64/steam" "${_bl_ui[@]}" -clientbeta "$steam_channel" \
-        -no-cef-sandbox -cef-force-gpu -cef-ozone-platform=x11 \
-        -cef-use-gl=angle -cef-use-angle=vulkan "$@"
+        -no-cef-sandbox -cef-ozone-platform=x11 "${_bl_cef[@]}" "$@"
       rc=$?
       echo "== steam exited rc=$rc"
       collect_steam_logs

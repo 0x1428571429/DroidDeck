@@ -1,0 +1,119 @@
+diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
+index 54e4efc..226f9b7 100644
+--- a/src/rendervulkan.cpp
++++ b/src/rendervulkan.cpp
+@@ -349,6 +349,25 @@ bool CVulkanDevice::selectPhysDev(VkSurfaceKHR surface)
+ 	}
+ 
+ 	for (auto cphysDev : physDevs)
++	if ( supportsPresentId && supportsPresentWait )
++	{
++		VkPhysicalDevicePresentWaitFeaturesKHR waitFeatures = {
++			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR,
++		};
++		VkPhysicalDevicePresentIdFeaturesKHR idFeatures = {
++			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR,
++			.pNext = &waitFeatures,
++		};
++		VkPhysicalDeviceFeatures2 features = {
++			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
++			.pNext = &idFeatures,
++		};
++		vk.GetPhysicalDeviceFeatures2( physDev(), &features );
++		m_bSupportsPresentWait = idFeatures.presentId && waitFeatures.presentWait;
++	}
++	if ( GetBackend()->UsesVulkanSwapchain() && !m_bSupportsPresentWait )
++		vk_log.infof( "Present ID/wait unavailable; using timer-based pacing." );
++
+ 	{
+ 		VkPhysicalDeviceProperties deviceProperties;
+ 		vk.GetPhysicalDeviceProperties(cphysDev, &deviceProperties);
+@@ -450,7 +469,13 @@ bool CVulkanDevice::createDevice()
+ 	bool hasDrmProps = vulkan_has_drm_props();
+ 	bool supportsForeignQueue = false;
+ 	bool supportsHDRMetadata = false;
++	bool supportsPresentId = false;
++	bool supportsPresentWait = false;
+ 	for (const auto& ext : m_supportedExts) {
++		if ( strcmp(ext.extensionName, VK_KHR_PRESENT_ID_EXTENSION_NAME) == 0 )
++			supportsPresentId = true;
++		if ( strcmp(ext.extensionName, VK_KHR_PRESENT_WAIT_EXTENSION_NAME) == 0 )
++			supportsPresentWait = true;
+ 		if ( strcmp(ext.extensionName, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME) == 0 )
+ 			m_bSupportsModifiers = true;
+ 
+@@ -570,8 +595,11 @@ bool CVulkanDevice::createDevice()
+ 		enabledExtensions.push_back( VK_KHR_SWAPCHAIN_EXTENSION_NAME );
+ 		enabledExtensions.push_back( VK_KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION_NAME );
+ 
+-		enabledExtensions.push_back( VK_KHR_PRESENT_ID_EXTENSION_NAME );
+-		enabledExtensions.push_back( VK_KHR_PRESENT_WAIT_EXTENSION_NAME );
++		if ( m_bSupportsPresentWait )
++		{
++			enabledExtensions.push_back( VK_KHR_PRESENT_ID_EXTENSION_NAME );
++			enabledExtensions.push_back( VK_KHR_PRESENT_WAIT_EXTENSION_NAME );
++		}
+ 
+ 		if ( supportsHDRMetadata )
+ 			enabledExtensions.push_back( VK_EXT_HDR_METADATA_EXTENSION_NAME );
+@@ -646,7 +674,7 @@ bool CVulkanDevice::createDevice()
+ 
+ 	VkPhysicalDeviceFeatures2 features2 = {
+ 		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+-		.pNext = &presentIdFeatures,
++		.pNext = m_bSupportsPresentWait ? static_cast<void *>( &presentIdFeatures ) : static_cast<void *>( &features13 ),
+ 		.features = {
+ 			.shaderInt16 = m_bSupportsFp16,
+ 		},
+@@ -3086,7 +3114,7 @@ void vulkan_present_to_window( void )
+ 
+ 	VkPresentInfoKHR presentInfo = {
+ 		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+-		.pNext = &presentIdInfo,
++		.pNext = g_device.supportsPresentWait() ? &presentIdInfo : nullptr,
+ 		.swapchainCount = 1,
+ 		.pSwapchains = &g_output.swapChain,
+ 		.pImageIndices = &g_output.nOutImage,
+@@ -3094,8 +3122,11 @@ void vulkan_present_to_window( void )
+ 
+ 	if ( g_device.vk.QueuePresentKHR( g_device.queue(), &presentInfo ) == VK_SUCCESS )
+ 	{
+-		g_currentPresentWaitId = presentId;
+-		g_currentPresentWaitId.notify_all();
++		if ( g_device.supportsPresentWait() )
++		{
++			g_currentPresentWaitId = presentId;
++			g_currentPresentWaitId.notify_all();
++		}
+ 	}
+ 	else
+ 		vulkan_remake_swapchain();
+@@ -3662,7 +3693,7 @@ bool vulkan_init( VkInstance instance, VkSurfaceKHR surface )
+ 	if (!init_nis_data())
+ 		return false;
+ 
+-	if ( GetBackend()->UsesVulkanSwapchain() )
++	if ( GetBackend()->UsesVulkanSwapchain() && g_device.supportsPresentWait() )
+ 	{
+ 		std::thread present_wait_thread( present_wait_thread_func );
+ 		present_wait_thread.detach();
+diff --git a/src/rendervulkan.hpp b/src/rendervulkan.hpp
+index fa519db..91f7793 100644
+--- a/src/rendervulkan.hpp
++++ b/src/rendervulkan.hpp
+@@ -862,6 +862,7 @@ public:
+ 	inline VkPipelineLayout pipelineLayout() {return m_pipelineLayout;}
+ 	inline int drmRenderFd() {return m_drmRendererFd;}
+ 	inline bool supportsModifiers() {return m_bSupportsModifiers;}
++	inline bool supportsPresentWait() {return m_bSupportsPresentWait;}
+ 	inline bool hasDrmPrimaryDevId() {return m_bHasDrmPrimaryDevId;}
+ 	inline dev_t primaryDevId() {return m_drmPrimaryDevId;}
+ 	inline bool supportsFp16() {return m_bSupportsFp16;}
+@@ -930,6 +931,7 @@ protected:
+ 	uint32_t m_uVendorID = 0;
+ 	bool m_bHasDrmPrimaryDevId = false;
+ 	bool m_bSupportsModifiers = false;
++	bool m_bSupportsPresentWait = false;
+ 	bool m_bInitialized = false;
+ 
+ 
