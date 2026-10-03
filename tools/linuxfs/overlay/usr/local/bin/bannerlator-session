@@ -73,6 +73,15 @@ if [ -n "${BL_VK_DRIVER:-}" ]; then
   fi
   unset bl_icd_lib
 fi
+# Compatibility mode: the Android presenter still uses its selected Vulkan driver, while the
+# Linux session renders on the CPU. Gamescope's SDL swapchain can carry these frames as wl_shm;
+# its Wayland backend requires exportable dma-bufs even for its dummy black texture.
+if [ "${BL_STEAM_SOFTWARE:-0}" = 1 ]; then
+  export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json
+  export VK_ICD_FILENAMES=$VK_DRIVER_FILES
+  export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe MESA_LOADER_DRIVER_OVERRIDE=swrast
+  echo "== linux graphics: software rendering requested (Lavapipe/llvmpipe)"
+fi
 # The app's gamescope build (tools/gamescope) asks for realtime-priority Vulkan queues on this
 # switch instead of on CAP_SYS_NICE, which proot never has; it falls back to normal priority
 # where the driver refuses, and the runtime's own build ignores it. On KGSL Turnip (Mesa 26.2) it
@@ -148,7 +157,13 @@ if [ -z "${BL_INSIDE:-}" ]; then
       echo "== gamescope: games at ${nested}x${height} stretched to the ${width}x${height} output"
     fi
   fi
-  args=(--backend wayland --expose-wayland -f -W "$width" -H "$height" -w "$nested" -h "$height")
+  backend=wayland
+  if [ "${BL_STEAM_SOFTWARE:-0}" = 1 ]; then
+    backend=sdl
+    export SDL_VIDEODRIVER=wayland
+    echo "== gamescope: SDL Wayland swapchain for software rendering"
+  fi
+  args=(--backend "$backend" --expose-wayland -f -W "$width" -H "$height" -w "$nested" -h "$height")
   [ "$nested" != "$width" ] && args+=(-S stretch)
   # -r is what gamescope advertises as the refresh rate, and what a game reads as the display's.
   # Left unset it defaults to 60, so a 120 Hz panel offers only 60 Hz in game settings. The FPS
@@ -179,7 +194,8 @@ if [ -z "${BL_INSIDE:-}" ]; then
   # MANGOHUD_CONFIGFILE. The apk stages Valve's aarch64 build (tools/mangoapp) - without it the menu
   # still offers the levels and nothing appears. Starts hidden until the client writes a level.
   # BL_MANGOAPP=0 turns it off (one community build found Valve's mangoapp crashing on Turnip).
-  if [ "$mode" = steam ] && [ "${BL_STEAMDECK:-0}" = 1 ] && [ "${BL_MANGOAPP:-1}" = 1 ] \
+  if [ "$mode" = steam ] && [ "${BL_STEAM_SOFTWARE:-0}" != 1 ] \
+     && [ "${BL_STEAMDECK:-0}" = 1 ] && [ "${BL_MANGOAPP:-1}" = 1 ] \
      && [ "${BL_STEAM_UI:-}" != desktop ] && command -v mangoapp >/dev/null 2>&1; then
     MANGOHUD_CONFIGFILE=$(mktemp /tmp/mangohud.XXXXXXXX)
     echo no_display > "$MANGOHUD_CONFIGFILE"

@@ -1,5 +1,5 @@
 diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
-index 54e4efc..226f9b7 100644
+index 54e4efc..43239d8 100644
 --- a/src/rendervulkan.cpp
 +++ b/src/rendervulkan.cpp
 @@ -349,6 +349,25 @@ bool CVulkanDevice::selectPhysDev(VkSurfaceKHR surface)
@@ -88,7 +88,17 @@ index 54e4efc..226f9b7 100644
  	}
  	else
  		vulkan_remake_swapchain();
-@@ -3662,7 +3693,7 @@ bool vulkan_init( VkInstance instance, VkSurfaceKHR surface )
+@@ -3161,7 +3192,8 @@ gamescope::Rc<CVulkanTexture> vulkan_get_hacky_blank_texture()
+ gamescope::OwningRc<CVulkanTexture> vulkan_create_flat_texture( uint32_t width, uint32_t height, uint8_t r, uint8_t g, uint8_t b, uint8_t a )
+ {
+ 	CVulkanTexture::createFlags flags;
+-	flags.bFlippable = true;
++	// A swapchain backend samples this texture locally; it never scans it out.
++	flags.bFlippable = !GetBackend()->UsesVulkanSwapchain();
+ 	flags.bSampled = true;
+ 	flags.bTransferDst = true;
+ 
+@@ -3662,7 +3694,7 @@ bool vulkan_init( VkInstance instance, VkSurfaceKHR surface )
  	if (!init_nis_data())
  		return false;
  
