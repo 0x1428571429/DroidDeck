@@ -4,6 +4,7 @@ import android.os.StatFs
 import android.system.Os
 import android.util.Log
 import java.io.File
+import java.io.RandomAccessFile
 
 /** The opt-in snapshot written beside a session's other logs. */
 object StorageDiagnostics {
@@ -18,6 +19,7 @@ object StorageDiagnostics {
         library: File,
         selectedLibrary: String,
         removable: Boolean,
+        truncateAllocates: Boolean? = null,
     ): Long? {
         val device = runCatching { Os.stat(library.absolutePath).st_dev }.getOrNull()
         val text = buildString {
@@ -25,6 +27,7 @@ object StorageDiagnostics {
             appendLine("selected_library=$selectedLibrary")
             appendLine("volume_removable=$removable")
             appendLine("filesystem=${filesystemType(library) ?: "unknown"}")
+            truncateAllocates?.let { appendLine("truncate_allocation_probe=${if (it) "passed" else "failed"}") }
             runCatching { StatFs(library.path) }.onSuccess { fs ->
                 appendLine("block_size_bytes=${fs.blockSizeLong}")
                 appendLine("total_bytes=${fs.totalBytes}")
@@ -44,6 +47,24 @@ object StorageDiagnostics {
             Log.w(TAG, "could not write storage diagnostic snapshot", e)
             null
         }
+    }
+
+    /** Only enable the removable-volume fallback when extending a real file reserves its blocks. */
+    fun truncateReservesSpace(library: File): Boolean {
+        val probe = runCatching { File.createTempFile(".droiddeck-alloc-", ".probe", library) }.getOrNull()
+            ?: return false
+        var supported = false
+        try {
+            val size = 1024L * 1024L
+            RandomAccessFile(probe, "rw").use { it.setLength(size) }
+            val stat = Os.stat(probe.absolutePath)
+            supported = stat.st_blocks >= (size + 511L) / 512L
+        } catch (_: Exception) {
+            supported = false
+        } finally {
+            if (probe.exists() && !probe.delete()) supported = false
+        }
+        return supported
     }
 
     /** The longest matching mount entry determines the filesystem for nested bindable folders. */

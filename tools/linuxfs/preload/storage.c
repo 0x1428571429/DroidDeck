@@ -1,11 +1,10 @@
 /*
  * Opt-in observations for file allocation and writes to the selected Steam library.
  *
- * Steam's allocation failure and any later fallback are left entirely to the caller. These
- * wrappers only forward the same arguments, record the result and restore errno after logging.
- * The session enables them only when storage diagnostics are turned on. Counters are local to
- * each process, allocation details are capped, writes are sampled, and storage.log has a global
- * size limit because every Steam child shares it.
+ * A removable FAT library can reject fallocate while still reserving clusters when a file is
+ * extended. In that one case the wrappers use ftruncate as the allocation fallback. Optional
+ * diagnostics are separate: counters are local to each process, allocation details are capped,
+ * writes are sampled, and storage.log has a global size limit because every Steam child shares it.
  *
  * LD_PRELOAD cannot see direct syscalls or libc-internal calls that bypass public symbols. A
  * missing entry therefore does not prove the operation did not happen.
@@ -43,8 +42,10 @@ static struct counters stats;
 static volatile uint64_t pwrite_seen;
 static volatile unsigned int alloc_details;
 static long long selected_device;
+static int selected_device_valid;
 static int init_state;
 static int enabled;
+static int preallocation_fallback_enabled;
 
 static uint64_t add(volatile uint64_t *slot, uint64_t value) {
   return __atomic_add_fetch(slot, value, __ATOMIC_RELAXED);
@@ -71,14 +72,17 @@ static void initialize(void) {
     return;
   }
   const char *on = getenv("BL_STORAGE_DIAGNOSTICS");
+  const char *preallocate = getenv("BL_STORAGE_PREALLOCATE_FALLBACK");
   const char *device = getenv("BL_STORAGE_DEVICE");
-  if (on != NULL && strcmp(on, "1") == 0 && device != NULL && *device != '\0') {
+  if (device != NULL && *device != '\0') {
     char *end = NULL;
     errno = 0;
     long long parsed = strtoll(device, &end, 10);
     if (errno == 0 && end != device && *end == '\0') {
       selected_device = parsed;
-      enabled = 1;
+      selected_device_valid = 1;
+      enabled = on != NULL && strcmp(on, "1") == 0;
+      preallocation_fallback_enabled = preallocate != NULL && strcmp(preallocate, "1") == 0;
     }
   }
   __atomic_store_n(&init_state, 2, __ATOMIC_RELEASE);
@@ -90,16 +94,35 @@ static uint64_t now_ns(void) {
   return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 
-static int on_selected_device(int fd, const struct stat *known) {
+static int on_selected_device(int fd, const struct stat *known, int allow_preallocation_fallback) {
   struct stat local;
   initialize();
-  if (!enabled) return 0;
+  if (!selected_device_valid || (!enabled &&
+      !(allow_preallocation_fallback && preallocation_fallback_enabled))) return 0;
   if (known == NULL) {
     if (next_fstat == NULL) next_fstat = dlsym(RTLD_NEXT, "fstat");
     if (next_fstat == NULL || next_fstat(fd, &local) != 0) return 0;
     known = &local;
   }
   return (long long)known->st_dev == selected_device;
+}
+
+/* On removable FAT/exFAT, extending the file allocates clusters without writing zeroes. */
+static int extend_for_allocation(int fd, off_t offset, off_t length) {
+  off_t end;
+  if (offset < 0 || length <= 0 || __builtin_add_overflow(offset, length, &end)) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (next_fstat == NULL) next_fstat = dlsym(RTLD_NEXT, "fstat");
+  if (next_fstat == NULL) { errno = ENOSYS; return -1; }
+  struct stat st;
+  if (next_fstat(fd, &st) != 0) return -1;
+  /* A non-sparse removable FAT file already has clusters through its current size. */
+  if (st.st_size >= end) return 0;
+  if (next_ftruncate == NULL) next_ftruncate = dlsym(RTLD_NEXT, "ftruncate");
+  if (next_ftruncate == NULL) { errno = ENOSYS; return -1; }
+  return next_ftruncate(fd, end);
 }
 
 static void comm_name(char *out, size_t size) {
@@ -158,15 +181,26 @@ int fallocate(int fd, int mode, off_t offset, off_t length) {
   int entry_errno = errno;
   if (next_fallocate == NULL) next_fallocate = dlsym(RTLD_NEXT, "fallocate");
   if (next_fallocate == NULL) { errno = ENOSYS; return -1; }
-  int selected = on_selected_device(fd, NULL);
+  int selected = on_selected_device(fd, NULL, 1);
   errno = entry_errno;
   if (!selected) return next_fallocate(fd, mode, offset, length);
   uint64_t start = now_ns();
   errno = entry_errno;
   int result = next_fallocate(fd, mode, offset, length);
   int call_errno = errno;
+  const char *api = "fallocate";
+  if (result != 0 && call_errno == EOPNOTSUPP && mode == 0 &&
+      preallocation_fallback_enabled) {
+    if (extend_for_allocation(fd, offset, length) == 0) {
+      result = 0;
+      call_errno = entry_errno;
+      api = "fallocate_ftruncate";
+    } else {
+      call_errno = errno;
+    }
+  }
   uint64_t elapsed = now_ns() - start;
-  allocation_line("fallocate", result, call_errno, mode, offset, length, elapsed);
+  if (enabled) allocation_line(api, result, call_errno, mode, offset, length, elapsed);
   errno = call_errno;
   return result;
 }
@@ -175,7 +209,7 @@ int posix_fallocate(int fd, off_t offset, off_t length) {
   int entry_errno = errno;
   if (next_posix_fallocate == NULL) next_posix_fallocate = dlsym(RTLD_NEXT, "posix_fallocate");
   if (next_posix_fallocate == NULL) { errno = entry_errno; return ENOSYS; }
-  int selected = on_selected_device(fd, NULL);
+  int selected = on_selected_device(fd, NULL, 1);
   errno = entry_errno;
   if (!selected) {
     int result = next_posix_fallocate(fd, offset, length);
@@ -183,11 +217,38 @@ int posix_fallocate(int fd, off_t offset, off_t length) {
     return result;
   }
   uint64_t start = now_ns();
-  errno = entry_errno;
-  int result = next_posix_fallocate(fd, offset, length);
-  int call_errno = errno;
+  int result;
+  int call_errno;
+  const char *api = "posix_fallocate";
+  if (preallocation_fallback_enabled && next_fallocate == NULL)
+    next_fallocate = dlsym(RTLD_NEXT, "fallocate");
+  if (preallocation_fallback_enabled && next_fallocate != NULL) {
+    errno = entry_errno;
+    int fallocate_result = next_fallocate(fd, 0, offset, length);
+    call_errno = errno;
+    if (fallocate_result == 0) {
+      result = 0;
+    } else if (call_errno == EOPNOTSUPP) {
+      if (extend_for_allocation(fd, offset, length) == 0) {
+        result = 0;
+        call_errno = entry_errno;
+        api = "posix_fallocate_ftruncate";
+      } else {
+        call_errno = errno;
+        result = call_errno;
+        api = "posix_fallocate_ftruncate";
+      }
+    } else {
+      /* posix_fallocate reports the underlying errno as its return value. */
+      result = call_errno;
+    }
+  } else {
+    errno = entry_errno;
+    result = next_posix_fallocate(fd, offset, length);
+    call_errno = errno;
+  }
   uint64_t elapsed = now_ns() - start;
-  allocation_line("posix_fallocate", result, call_errno, 0, offset, length, elapsed);
+  if (enabled) allocation_line(api, result, call_errno, 0, offset, length, elapsed);
   errno = entry_errno; /* POSIX requires the error to be returned, leaving errno unchanged. */
   return result;
 }
@@ -199,7 +260,7 @@ ssize_t pwrite(int fd, const void *buffer, size_t count, off_t offset) {
   initialize();
   uint64_t sequence = enabled ? add(&pwrite_seen, 1) : 1;
   int sample = enabled && (sequence % 32ULL) == 0;
-  int selected = sample && on_selected_device(fd, NULL);
+  int selected = sample && on_selected_device(fd, NULL, 0);
   errno = entry_errno;
   if (!selected)
     return next_pwrite(fd, buffer, count, offset);
@@ -221,7 +282,7 @@ int ftruncate(int fd, off_t length) {
   int entry_errno = errno;
   if (next_ftruncate == NULL) next_ftruncate = dlsym(RTLD_NEXT, "ftruncate");
   if (next_ftruncate == NULL) { errno = ENOSYS; return -1; }
-  int selected = on_selected_device(fd, NULL);
+  int selected = enabled && on_selected_device(fd, NULL, 0);
   errno = entry_errno;
   if (!selected) return next_ftruncate(fd, length);
   uint64_t start = now_ns();
@@ -249,7 +310,7 @@ int fstat(int fd, struct stat *out) {
   int result = next_fstat(fd, out);
   int call_errno = errno;
   uint64_t elapsed = now_ns() - start;
-  if (result == 0 && on_selected_device(fd, out)) {
+  if (result == 0 && enabled && on_selected_device(fd, out, 0)) {
     add(&stats.fstat_calls, 1);
     add(&stats.fstat_elapsed_ns, elapsed);
     update_max(&stats.fstat_max_ns, elapsed);
@@ -262,7 +323,7 @@ int fsync(int fd) {
   int entry_errno = errno;
   if (next_fsync == NULL) next_fsync = dlsym(RTLD_NEXT, "fsync");
   if (next_fsync == NULL) { errno = ENOSYS; return -1; }
-  int selected = on_selected_device(fd, NULL);
+  int selected = enabled && on_selected_device(fd, NULL, 0);
   errno = entry_errno;
   if (!selected) return next_fsync(fd);
   uint64_t start = now_ns();

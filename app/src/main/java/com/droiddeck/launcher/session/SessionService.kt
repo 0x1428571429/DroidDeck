@@ -20,6 +20,7 @@ import android.os.IBinder
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.system.Os
 import android.util.Log
 import com.droiddeck.launcher.R
 import com.droiddeck.launcher.SessionActivity
@@ -811,25 +812,37 @@ class SessionService : Service() {
         } else {
             Log.i(TAG, "game storage: internal only")
         }
-        if (SessionState.mode == MODE_STEAM && SessionPrefs.storageDiagnosticsEnabled(this)) {
+        val removableLibrary = storageDiagnosticLibrary?.let {
+            runCatching { Environment.isExternalStorageRemovable(it) }.getOrDefault(false)
+        } ?: false
+        val truncateAllocationSupported = storageDiagnosticLibrary?.takeIf { removableLibrary }?.let {
+            StorageDiagnostics.truncateReservesSpace(it)
+        }
+        val preallocationDevice = storageDiagnosticLibrary?.takeIf { truncateAllocationSupported == true }?.let {
+            runCatching { Os.stat(it.absolutePath).st_dev }.getOrNull()
+        }
+        val diagnosticDevice = if (SessionState.mode == MODE_STEAM && SessionPrefs.storageDiagnosticsEnabled(this)) {
             val target = storageDiagnosticLibrary ?: File(LinuxRuntime.rootDir(this), "root/.local/share/Steam")
             val device = StorageDiagnostics.writeSnapshot(
                 sessionDir, target,
                 selectedLibrary = if (storageDiagnosticLibrary != null) "secondary" else "internal",
-                removable = storageDiagnosticLibrary?.let {
-                    runCatching { Environment.isExternalStorageRemovable(it) }.getOrDefault(false)
-                } ?: false,
+                removable = removableLibrary,
+                truncateAllocates = truncateAllocationSupported,
             )
-            if (device != null) {
-                // guest already has the session command at this point. Put these with the `env -i`
-                // assignments so they reach the Steam process instead of becoming script args.
-                val envAt = guest.indexOf(LinuxRuntime.SESSION_SCRIPT).takeIf { it >= 0 } ?: guest.size
-                guest.add(envAt, "BL_STORAGE_DIAGNOSTICS=1")
-                guest.add(envAt + 1, "BL_STORAGE_DEVICE=$device")
-                guest.add(envAt + 2, "BL_STORAGE_LOG=${File(sessionDir, "storage.log").absolutePath}")
-            } else {
-                Log.w(TAG, "storage diagnostics: selected library could not be identified; metadata snapshot only")
+            if (device == null) Log.w(TAG, "storage diagnostics: selected library could not be identified; metadata snapshot only")
+            device
+        } else null
+        if (SessionState.mode == MODE_STEAM && (preallocationDevice != null || diagnosticDevice != null)) {
+            // These go with the script's `env -i` assignments, before the session command.
+            val envAt = guest.indexOf(LinuxRuntime.SESSION_SCRIPT).takeIf { it >= 0 } ?: guest.size
+            val env = ArrayList<String>()
+            env.add("BL_STORAGE_DEVICE=${preallocationDevice ?: diagnosticDevice}")
+            if (preallocationDevice != null) env.add("BL_STORAGE_PREALLOCATE_FALLBACK=1")
+            if (diagnosticDevice != null) {
+                env.add("BL_STORAGE_DIAGNOSTICS=1")
+                env.add("BL_STORAGE_LOG=${File(sessionDir, "storage.log").absolutePath}")
             }
+            guest.addAll(envAt, env)
         }
         // The user's own games folder (the Steam cog's "Added games"), bound at a fixed place so
         // the shortcuts the app writes point somewhere whatever storage the folder is on.
