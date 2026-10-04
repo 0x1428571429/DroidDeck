@@ -13,7 +13,6 @@
 
 #define FUSE_SUPER_MAGIC 0x65735546
 #define CACHE_SLOTS 32
-#define MAX_ENTRIES 4096
 #define CACHE_TTL_NS 2000000000ULL
 
 struct listing {
@@ -123,11 +122,26 @@ static struct listing *listing_for(DIR *dir) {
     struct listing *slot = available_listing();
     if (!slot) return NULL;
 
-    struct dirent64 *entries = calloc(MAX_ENTRIES, sizeof(*entries));
+    size_t capacity = 64;
+    struct dirent64 *entries = malloc(capacity * sizeof(*entries));
     if (!entries) return NULL;
     size_t count = 0;
     int error = 0;
-    while (count < MAX_ENTRIES) {
+    for (;;) {
+        if (count == capacity) {
+            if (capacity > SIZE_MAX / 2 / sizeof(*entries)) {
+                error = ENOMEM;
+                break;
+            }
+            size_t next_capacity = capacity * 2;
+            struct dirent64 *grown = realloc(entries, next_capacity * sizeof(*entries));
+            if (!grown) {
+                error = ENOMEM;
+                break;
+            }
+            entries = grown;
+            capacity = next_capacity;
+        }
         errno = 0;
         struct dirent64 *entry = real_readdir64(dir);
         if (!entry) {
@@ -135,12 +149,13 @@ static struct listing *listing_for(DIR *dir) {
             break;
         }
         size_t bytes = entry->d_reclen < sizeof(*entry) ? entry->d_reclen : sizeof(*entry);
+        memset(&entries[count], 0, sizeof(*entries));
         memcpy(&entries[count++], entry, bytes);
     }
     real_rewinddir(dir);
 
     struct stat after;
-    if (count == MAX_ENTRIES || error || fstat(fd, &after) != 0 ||
+    if (error || fstat(fd, &after) != 0 ||
         before.st_dev != after.st_dev || before.st_ino != after.st_ino ||
         before.st_mtim.tv_sec != after.st_mtim.tv_sec ||
         before.st_mtim.tv_nsec != after.st_mtim.tv_nsec ||
@@ -191,6 +206,11 @@ struct dirent64 *readdir64(DIR *dir) {
         return entry;
     }
     return real_readdir64(dir);
+}
+
+/* 32- and 64-bit dirent layouts are identical in the supported 64-bit runtimes. */
+struct dirent *readdir(DIR *dir) {
+    return (struct dirent *)readdir64(dir);
 }
 
 int closedir(DIR *dir) {
