@@ -53,17 +53,13 @@ internal fun SettingsCategoryPage(
     }
     CompositionLocalProvider(LocalSettingsTarget provides target, LocalSettingsAnchorsEnabled provides true) {
         SettingsPage(
-            host, category.title, back, eyebrow = "Settings",
-            lede = category.description,
+            host, category.title, back,
         ) {
             if (category == SettingsCategory.DISPLAY || category == SettingsCategory.SESSIONS) {
                 SegmentedTabs(
                     listOf("steam" to "Steam", "desktop" to "Desktop"), mode,
                     Modifier.padding(bottom = 10.dp), a.onSettingsMode,
                 )
-                Lede("${if (mode == "steam") "Steam" else "Desktop"} session defaults. Controls marked Shared apply to both modes.")
-            } else {
-                Lede("Shared defaults. Steam-only options are labeled where applicable.")
             }
             Column(Modifier.fillMaxWidth().focusRequester(entry).onFocusChanged { hasFocus = it.hasFocus }.focusGroup()) {
                 if (category != SettingsCategory.SESSIONS || mode == "steam") {

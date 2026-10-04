@@ -147,7 +147,7 @@ internal fun SetupContent(
 @Composable
 private fun GeneralSettings(s: FrontEndState, a: FrontEndActions, host: MenuHost) {
     SettingsGroup(stringResource(R.string.setup_launcher)) {
-        SettingsAnchor("theme") { SettingsRow(stringResource(R.string.setup_theme), stringResource(R.string.setup_theme_hint)) {
+        SettingsAnchor("theme") { SettingsRow(stringResource(R.string.setup_theme), null) {
             Box {
                 ValueChip(Themes.byId(s.theme).label, host.open == "theme") { host.open = if (host.open == "theme") null else "theme" }
                 AnchoredMenu(host.open == "theme", onDismiss = { if (host.open == "theme") host.open = null }, title = stringResource(R.string.setup_theme)) { firstItemFocus ->
@@ -211,7 +211,7 @@ private fun ControlsSettings(s: FrontEndState, a: FrontEndActions, host: MenuHos
 private fun LibrarySettings(s: FrontEndState, a: FrontEndActions) {
     SettingsGroup("Library and files") {
         val roms = s.romsDir ?: stringResource(R.string.setup_tool_roms_hint)
-        SettingsAnchor("files") { ActionRow(stringResource(R.string.setup_tool_files), stringResource(R.string.setup_tool_files_hint), "Open", a.onFiles) }
+        SettingsAnchor("files") { ActionRow(stringResource(R.string.setup_tool_files), null, "Open", a.onFiles) }
         SettingsAnchor("roms") { ActionRow(stringResource(R.string.setup_tool_roms), roms, "Open", a.onRoms) }
     }
 }
@@ -230,7 +230,7 @@ private fun CompatibilitySettings(s: FrontEndState, a: FrontEndActions) {
     SettingsGroup("Compatibility tools") {
         SettingsAnchor("components") { ActionRow(stringResource(R.string.setup_card_components), stringResource(R.string.setup_card_components_hint), "Open") { a.onComponents(true) } }
         SettingsAnchor("protons") { ActionRow(stringResource(R.string.setup_tool_protons), stringResource(R.string.setup_tool_protons_hint), "Open", a.onProtons) }
-        SettingsAnchor("performance") { ActionRow(stringResource(R.string.setup_tool_performance), stringResource(R.string.setup_tool_performance_hint), "Open", a.onPerformance) }
+        SettingsAnchor("performance") { ActionRow(stringResource(R.string.setup_tool_performance), null, "Open", a.onPerformance) }
     }
 }
 

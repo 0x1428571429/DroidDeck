@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DisplaySettings
@@ -38,7 +37,15 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -252,7 +259,7 @@ fun SettingsHub(s: FrontEndState, a: FrontEndActions) {
         if (query.isBlank()) {
             val columns = if (LocalNarrowPane.current) 1 else 2
             cards.chunked(columns).forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 96.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp)) {
                     row.forEach { card ->
                         SettingsCategoryCard(card, Modifier.weight(1f).paneItem("settings-category:${card.category.name}"), onClick = { a.onSettingsCategory(card.category, null) })
                     }
@@ -284,19 +291,45 @@ private fun HubSearchField(query: String, onQuery: (String) -> Unit, frontFocus:
             .border(1.dp, pal.line2, shape).padding(horizontal = 14.dp, vertical = 11.dp),
     ) {
         Icon(Icons.Outlined.Search, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(20.dp))
-        BasicTextField(
-            value = query,
-            onValueChange = onQuery,
-            singleLine = true,
-            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, color = colors.onBackground),
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(pal.signal),
-            modifier = Modifier.weight(1f)
-                .then(if (frontFocus == null) Modifier else Modifier.focusRequester(frontFocus.primary).onFocusChanged { if (it.isFocused) frontFocus.last = FrontFocus.PRIMARY })
-                .semantics { contentDescription = "Search settings" },
-            decorationBox = { inner ->
-                Box {
-                    if (query.isEmpty()) Text("Search settings", fontSize = 15.sp, color = colors.onSurfaceVariant)
-                    inner()
+        val onQueryLatest = rememberUpdatedState(onQuery)
+        AndroidView(
+            modifier = Modifier.weight(1f).height(30.dp)
+                .then(if (frontFocus == null) Modifier else Modifier.focusRequester(frontFocus.primary)),
+            factory = { context ->
+                EditText(context).apply {
+                    isSingleLine = true
+                    background = null
+                    setPadding(0, 0, 0, 0)
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
+                    hint = "Search settings"
+                    contentDescription = "Search settings"
+                    // Keep the hub visible while typing on landscape handhelds.
+                    imeOptions = EditorInfo.IME_ACTION_SEARCH or EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                    setOnFocusChangeListener { _, focused ->
+                        if (focused) frontFocus?.last = FrontFocus.PRIMARY
+                    }
+                    setOnEditorActionListener { _, action, _ ->
+                        if (action == EditorInfo.IME_ACTION_SEARCH) {
+                            (context.getSystemService(InputMethodManager::class.java)).hideSoftInputFromWindow(windowToken, 0)
+                            clearFocus()
+                            true
+                        } else false
+                    }
+                    addTextChangedListener(object : TextWatcher {
+                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                            onQueryLatest.value(s?.toString().orEmpty())
+                        }
+                        override fun afterTextChanged(s: Editable?) = Unit
+                    })
+                }
+            },
+            update = { field ->
+                field.setTextColor(colors.onBackground.toArgb())
+                field.setHintTextColor(colors.onSurfaceVariant.toArgb())
+                if (field.text.toString() != query) {
+                    field.setText(query)
+                    field.setSelection(query.length)
                 }
             },
         )
@@ -327,7 +360,6 @@ private fun SettingsCategoryCard(card: CategoryCard, modifier: Modifier, onClick
     ) {
         Icon(card.icon, contentDescription = null, tint = if (focused || hovered) pal.signal else colors.onSurfaceVariant, modifier = Modifier.size(22.dp))
         Text(card.category.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colors.onBackground, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Text(card.category.description, fontSize = 13.sp, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -351,7 +383,6 @@ private fun SettingsSearchResult(entry: SettingsEntry, modifier: Modifier = Modi
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(entry.title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = colors.onBackground)
-            Text(entry.description, fontSize = 13.sp, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(12.dp))
         Text(entry.category.title, fontSize = 12.sp, color = pal.signal, maxLines = 1, overflow = TextOverflow.Ellipsis)
