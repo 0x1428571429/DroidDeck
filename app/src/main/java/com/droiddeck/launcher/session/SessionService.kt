@@ -817,9 +817,9 @@ class SessionService : Service() {
             val device = StorageDiagnostics.writeSnapshot(
                 sessionDir, target,
                 selectedLibrary = if (storageDiagnosticLibrary != null) "secondary" else "internal",
-                removable = storageDiagnosticLibrary?.let {
-                    runCatching { Environment.isExternalStorageRemovable(it) }.getOrDefault(false)
-                } ?: false,
+                removable = storageDiagnosticLibrary != null && library?.let {
+                    runCatching { Environment.isExternalStorageRemovable(File(it.path)) }.getOrDefault(false)
+                } == true,
             )
             if (device != null) {
                 // guest already has the session command at this point. Put these with the `env -i`
