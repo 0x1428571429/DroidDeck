@@ -36,8 +36,6 @@ fun ProtonPage(
     SettingsPage(
         host,
         title = stringResource(R.string.setup_tool_protons),
-        eyebrow = stringResource(R.string.settings_title),
-        lede = "Install ARM64 Proton versions here. Choose the default Proton in Components; set per-game overrides in Steam → Properties → Compatibility.",
         onBack = onBack,
     ) {
         if (!runtimeReady) Text(
