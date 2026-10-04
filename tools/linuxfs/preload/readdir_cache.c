@@ -30,6 +30,10 @@ struct reader {
     DIR *dir;
     struct listing *listing;
     size_t pos;
+    size_t capacity;
+    int cached;
+    int capture_failed;
+    struct listing capture;
     struct reader *next;
 };
 
@@ -85,7 +89,8 @@ static void release_reader(DIR *dir) {
     while (*link) {
         if ((*link)->dir == dir) {
             struct reader *reader = *link;
-            reader->listing->readers--;
+            if (reader->cached) reader->listing->readers--;
+            else free(reader->capture.entries);
             *link = reader->next;
             free(reader);
             return;
@@ -104,10 +109,9 @@ static struct listing *available_listing(void) {
     return oldest;
 }
 
-/* Capture a directory only for Steam's FUSE-backed library. The short lifetime is a fallback
- * for filesystems that fail to update directory timestamps; normal create/remove operations
- * invalidate the snapshot as soon as fstat observes their new mtime or ctime. */
-static struct listing *listing_for(DIR *dir) {
+/* Capture only what the caller reads. Completing a stable listing makes it reusable, without
+ * forcing callers that stop early to scan the whole directory or holding a global lock over I/O. */
+static struct reader *reader_for(DIR *dir) {
     int fd = dirfd(dir);
     struct statfs fs;
     struct stat before;
@@ -115,69 +119,72 @@ static struct listing *listing_for(DIR *dir) {
         fstatfs(fd, &fs) != 0 || fs.f_type != FUSE_SUPER_MAGIC || fstat(fd, &before) != 0)
         return NULL;
 
+    struct reader *reader = calloc(1, sizeof(*reader));
+    if (!reader) return NULL;
+    reader->dir = dir;
+    reader->capture = (struct listing){
+        .dev = before.st_dev, .ino = before.st_ino,
+        .mtime = before.st_mtim, .ctime = before.st_ctim,
+    };
+    reader->listing = &reader->capture;
     uint64_t now = monotonic_ns();
-    for (size_t i = 0; i < CACHE_SLOTS; i++)
-        if (same_directory(&listings[i], &before, now)) return &listings[i];
-
-    struct listing *slot = available_listing();
-    if (!slot) return NULL;
-
-    size_t capacity = 64;
-    struct dirent64 *entries = malloc(capacity * sizeof(*entries));
-    if (!entries) return NULL;
-    size_t count = 0;
-    int error = 0;
-    for (;;) {
-        if (count == capacity) {
-            if (capacity > SIZE_MAX / 2 / sizeof(*entries)) {
-                error = ENOMEM;
-                break;
-            }
-            size_t next_capacity = capacity * 2;
-            struct dirent64 *grown = realloc(entries, next_capacity * sizeof(*entries));
-            if (!grown) {
-                error = ENOMEM;
-                break;
-            }
-            entries = grown;
-            capacity = next_capacity;
-        }
-        errno = 0;
-        struct dirent64 *entry = real_readdir64(dir);
-        if (!entry) {
-            error = errno;
+    pthread_mutex_lock(&cache_lock);
+    for (size_t i = 0; i < CACHE_SLOTS; i++) {
+        if (same_directory(&listings[i], &before, now)) {
+            reader->listing = &listings[i];
+            reader->listing->readers++;
+            reader->cached = 1;
             break;
         }
-        size_t bytes = entry->d_reclen < sizeof(*entry) ? entry->d_reclen : sizeof(*entry);
-        memset(&entries[count], 0, sizeof(*entries));
-        memcpy(&entries[count++], entry, bytes);
     }
-    real_rewinddir(dir);
+    reader->next = readers;
+    readers = reader;
+    pthread_mutex_unlock(&cache_lock);
+    return reader;
+}
 
+static void capture_entry(struct reader *reader, const struct dirent64 *entry) {
+    struct listing *listing = &reader->capture;
+    if (listing->count == reader->capacity) {
+        size_t capacity = reader->capacity ? reader->capacity * 2 : 64;
+        if (capacity < reader->capacity || capacity > SIZE_MAX / sizeof(*entry)) {
+            reader->capture_failed = 1;
+            return;
+        }
+        struct dirent64 *grown = realloc(listing->entries, capacity * sizeof(*entry));
+        if (!grown) { reader->capture_failed = 1; return; }
+        listing->entries = grown;
+        reader->capacity = capacity;
+    }
+    size_t bytes = entry->d_reclen < sizeof(*entry) ? entry->d_reclen : sizeof(*entry);
+    memset(&listing->entries[listing->count], 0, sizeof(*entry));
+    memcpy(&listing->entries[listing->count++], entry, bytes);
+}
+
+static void publish_listing(struct reader *reader) {
     struct stat after;
-    if (error || fstat(fd, &after) != 0 ||
-        before.st_dev != after.st_dev || before.st_ino != after.st_ino ||
-        before.st_mtim.tv_sec != after.st_mtim.tv_sec ||
-        before.st_mtim.tv_nsec != after.st_mtim.tv_nsec ||
-        before.st_ctim.tv_sec != after.st_ctim.tv_sec ||
-        before.st_ctim.tv_nsec != after.st_ctim.tv_nsec) {
-        free(entries);
-        return NULL;
-    }
+    struct listing *listing = &reader->capture;
+    if (fstat(dirfd(reader->dir), &after) != 0 ||
+        listing->dev != after.st_dev || listing->ino != after.st_ino ||
+        listing->mtime.tv_sec != after.st_mtim.tv_sec ||
+        listing->mtime.tv_nsec != after.st_mtim.tv_nsec ||
+        listing->ctime.tv_sec != after.st_ctim.tv_sec ||
+        listing->ctime.tv_nsec != after.st_ctim.tv_nsec)
+        return;
 
-    struct dirent64 *small = realloc(entries, (count ? count : 1) * sizeof(*entries));
-    if (small) entries = small;
-    free(slot->entries);
-    *slot = (struct listing){
-        .dev = before.st_dev,
-        .ino = before.st_ino,
-        .mtime = before.st_mtim,
-        .ctime = before.st_ctim,
-        .expires = monotonic_ns() + CACHE_TTL_NS,
-        .count = count,
-        .entries = entries,
-    };
-    return slot;
+    pthread_mutex_lock(&cache_lock);
+    struct listing *slot = available_listing();
+    if (slot) {
+        free(slot->entries);
+        *slot = *listing;
+        slot->expires = monotonic_ns() + CACHE_TTL_NS;
+        slot->readers = 1;
+        reader->listing = slot;
+        reader->pos = slot->count;
+        reader->cached = 1;
+        listing->entries = NULL;
+    }
+    pthread_mutex_unlock(&cache_lock);
 }
 
 struct dirent64 *readdir64(DIR *dir) {
@@ -188,24 +195,25 @@ struct dirent64 *readdir64(DIR *dir) {
     int saved_errno = errno;
     pthread_mutex_lock(&cache_lock);
     struct reader *reader = find_reader(dir);
-    if (!reader) {
-        struct listing *listing = listing_for(dir);
-        if (listing && (reader = malloc(sizeof(*reader)))) {
-            *reader = (struct reader){dir, listing, 0, readers};
-            readers = reader;
-            listing->readers++;
+    pthread_mutex_unlock(&cache_lock);
+    if (!reader) reader = reader_for(dir);
+    if (reader && reader->cached) {
+        errno = saved_errno;
+        return reader->pos < reader->listing->count ?
+            &reader->listing->entries[reader->pos++] : NULL;
+    }
+    errno = 0;
+    struct dirent64 *entry = real_readdir64(dir);
+    int error = errno;
+    if (reader && !reader->capture_failed) {
+        if (entry) capture_entry(reader, entry);
+        else {
+            if (!error) publish_listing(reader);
+            reader->capture_failed = 1;
         }
     }
-    struct dirent64 *entry = NULL;
-    if (reader && reader->pos < reader->listing->count)
-        entry = &reader->listing->entries[reader->pos++];
-    pthread_mutex_unlock(&cache_lock);
-
-    if (reader) {
-        errno = saved_errno;
-        return entry;
-    }
-    return real_readdir64(dir);
+    errno = error ? error : saved_errno;
+    return entry;
 }
 
 /* 32- and 64-bit dirent layouts are identical in the supported 64-bit runtimes. */
@@ -241,10 +249,10 @@ long telldir(DIR *dir) {
     int saved_errno = errno;
     pthread_mutex_lock(&cache_lock);
     struct reader *reader = find_reader(dir);
-    long offset = reader ? (reader->pos ? reader->listing->entries[reader->pos - 1].d_off : 0) : -1;
+    long offset = reader && reader->cached ? (reader->pos ? reader->listing->entries[reader->pos - 1].d_off : 0) : -1;
     pthread_mutex_unlock(&cache_lock);
-    if (!reader && real_telldir) return real_telldir(dir);
-    if (!reader) { errno = ENOSYS; return -1; }
+    if ((!reader || !reader->cached) && real_telldir) return real_telldir(dir);
+    if (!reader || !reader->cached) { errno = ENOSYS; return -1; }
     errno = saved_errno;
     return offset;
 }
@@ -254,6 +262,10 @@ void seekdir(DIR *dir, long offset) {
     int saved_errno = errno;
     pthread_mutex_lock(&cache_lock);
     struct reader *reader = find_reader(dir);
+    if (reader && !reader->cached) {
+        release_reader(dir);
+        reader = NULL;
+    }
     if (reader) {
         size_t pos = 0;
         if (offset) {
