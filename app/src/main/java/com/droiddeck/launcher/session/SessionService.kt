@@ -799,9 +799,10 @@ class SessionService : Service() {
                 // Links, prefixes and Steam entries made before the rename still name the old path.
                 File(LinuxRuntime.rootDir(this), "mnt/bannerlator-sd").mkdirs()
                 try {
-                    binds.addAll(SecondaryLibrary.binds(filesDir, File(library.path)))
-                    storageDiagnosticLibrary = File(library.path)
-                    Log.i(TAG, "game storage: ${library.path} -> /mnt/droiddeck-sd (\"${library.label}\"); prefixes and native tools private")
+                    val content = SecondaryLibrary.contentPath(File(library.path))
+                    binds.addAll(SecondaryLibrary.binds(filesDir, File(library.path), content))
+                    storageDiagnosticLibrary = content
+                    Log.i(TAG, "game storage: ${content.path} -> /mnt/droiddeck-sd (\"${library.label}\"); prefixes and native tools private")
                 } catch (e: Exception) {
                     Log.w(TAG, "game storage: private directories could not be prepared; internal only this session", e)
                 }

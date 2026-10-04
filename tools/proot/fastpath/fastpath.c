@@ -10,7 +10,7 @@
  * It decides nothing proot would decide differently. The guest path is mapped literally - the
  * longest binding whose guest path is a prefix, else the rootfs - and the parent directory is
  * opened O_PATH and checked against /proc/self/fd. A case-only difference is accepted only on
- * FUSE and only after each differently spelled component is verified as a directory rather than
+ * FUSE or FAT and only after each differently spelled component is verified as a directory rather than
  * a symlink. The last component is looked at without following it; other symlinks go to proot.
  * So do "..", a trailing "/", anything under /proc, any flag not handled here and any failure
  * to decide: the real libc call runs, proot traps it and answers as it always has.
@@ -34,6 +34,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <linux/magic.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -257,10 +258,11 @@ static long canonical_dir(const char *dir) {
   out[n] = 0;
   if (strcmp(out, dir) != 0) {
     struct statfs fs;
-    int fuse = sc(SYS_fstatfs, fd, (long)&fs, 0, 0, 0) == 0 && fs.f_type == 0x65735546;
+    int case_alias = sc(SYS_fstatfs, fd, (long)&fs, 0, 0, 0) == 0 &&
+        (fs.f_type == FUSE_SUPER_MAGIC || fs.f_type == EXFAT_SUPER_MAGIC || fs.f_type == MSDOS_SUPER_MAGIC);
     sc(SYS_close, fd, 0, 0, 0, 0);
-    if (!fuse || strcasecmp(out, dir) != 0) return 0;
-    /* FUSE case aliases return the stored spelling from /proc/self/fd. Prove the final
+    if (!case_alias || strcasecmp(out, dir) != 0) return 0;
+    /* FUSE and FAT case aliases return the stored spelling from /proc/self/fd. Prove the final
      * component and each parent so a case-only symlink path still goes to proot. */
     struct stat st;
     if (sc(SYS_newfstatat, AT_FDCWD, (long)dir, (long)&st, AT_SYMLINK_NOFOLLOW, 0) != 0 ||

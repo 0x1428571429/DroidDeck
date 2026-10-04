@@ -6,6 +6,7 @@ import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.StandardCopyOption.COPY_ATTRIBUTES
 import java.security.MessageDigest
 import java.util.Locale
+import java.util.UUID
 
 /** Android shared storage cannot create the links in Wine prefixes or native Steam depots. */
 object SecondaryLibrary {
@@ -17,6 +18,30 @@ object SecondaryLibrary {
         "3127680" to "FEX-Emu",
     )
 
+    /** Some devices permit direct access to the backing volume; others require Android's FUSE path. */
+    fun contentPath(library: File): File {
+        val path = library.absolutePath
+        if (!path.startsWith("/storage/")) return library
+        return verifiedAlias(library, File("/mnt/media_rw/" + path.removePrefix("/storage/")))
+    }
+
+    internal fun verifiedAlias(library: File, candidate: File): File {
+        if (!candidate.isDirectory || !candidate.canRead() || !candidate.canWrite()) return library
+        var probe: File? = null
+        return try {
+            val created = File.createTempFile(".droiddeck-path-", ".probe", candidate)
+            probe = created
+            val token = UUID.randomUUID().toString()
+            created.writeText(token)
+            val visible = File(library, created.name)
+            if (visible.readText() == token && visible.delete() && !created.exists()) candidate else library
+        } catch (_: Exception) {
+            library
+        } finally {
+            probe?.delete()
+        }
+    }
+
     fun privateRoot(files: File, library: File): File {
         val digest = MessageDigest.getInstance("SHA-256").digest(library.canonicalPath.toByteArray())
             .joinToString("") { "%02x".format(it.toInt() and 255) }
@@ -24,7 +49,7 @@ object SecondaryLibrary {
     }
 
     /** Parent binds come first; the more specific private directories override them in PRoot. */
-    fun binds(files: File, library: File): List<String> {
+    fun binds(files: File, library: File, content: File = library): List<String> {
         val private = privateRoot(files, library)
         val apps = File(library, "steamapps")
         val tools = LinkedHashMap(bootstrapTools)
@@ -58,7 +83,7 @@ object SecondaryLibrary {
             }
         }
         return listOf("/mnt/droiddeck-sd", "/mnt/bannerlator-sd").flatMap { guest ->
-            listOf("${library.path}:$guest") + overrides.map { (host, relative) -> "${host.path}:$guest/$relative" }
+            listOf("${content.path}:$guest") + overrides.map { (host, relative) -> "${host.path}:$guest/$relative" }
         }
     }
 
