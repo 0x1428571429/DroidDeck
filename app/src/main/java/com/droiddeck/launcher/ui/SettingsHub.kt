@@ -187,7 +187,7 @@ object SettingsCatalog {
         SettingsEntry("runtime", SettingsCategory.SUPPORT, "Linux runtime", "Install, update, or manage the Linux runtime", listOf("runtime install", "container")),
         SettingsEntry("logs", SettingsCategory.SUPPORT, "Session logs", "Enable, share, or clear session logs", listOf("diagnostics", "debug logs")),
         SettingsEntry("updates", SettingsCategory.SUPPORT, "DroidDeck updates", "View build information and release channel", listOf("version", "build")),
-        SettingsEntry("phantom-process", SettingsCategory.SUPPORT, "Child-process limit", "Diagnose Android's process limit that can block Steam", listOf("phantom process", "developer options", "adb")),
+        SettingsEntry("phantom-process", SettingsCategory.SUPPORT, "Child-process limit", "Diagnose Android's process limit that can block Steam", listOf("phantom process", "developer options", "wireless debugging", "adb")),
     )
 
     fun search(query: String): List<SettingsEntry> = entries.filter { it.matches(query) }

@@ -77,7 +77,7 @@ import com.droiddeck.launcher.core.PhantomProcessStatus
 import com.droiddeck.launcher.session.SessionPrefs
 import com.droiddeck.launcher.R
 
-// The Setup page: runtime and device checks, tools, frame generation and launch settings.
+// Existing launcher preference owners, grouped into Settings categories.
 
 private enum class CheckState { OK, WARN, BUSY }
 
@@ -120,16 +120,6 @@ private fun CheckRow(state: CheckState, title: String, detail: String?, divider:
         if (action != null) action()
     }
     if (divider) Box(Modifier.fillMaxWidth().height(1.dp).background(pal.line))
-}
-
-@Composable
-internal fun SetupPanel(
-    s: FrontEndState,
-    a: FrontEndActions,
-    onOpenDeveloperOptions: () -> Unit,
-    onRequestWirelessAdb: (Boolean) -> Unit,
-) {
-    SettingsHub(s, a)
 }
 
 /** Settings owned by Setup's existing state/actions, split into hub categories. */
@@ -178,8 +168,11 @@ private fun GeneralSettings(s: FrontEndState, a: FrontEndActions, host: MenuHost
             s.launcherFullscreen) { a.onLauncherFullscreen(it) }
         ToggleRow(host, "launcher-animations", stringResource(R.string.setup_animations), null,
             s.animationsEnabled, onChange = a.onAnimationsEnabled)
-        if (s.homeScreenEnabled) SettingsAnchor("default-home") { ActionRow(stringResource(R.string.setup_default_home),
-            s.defaultHomeLabel ?: stringResource(R.string.setup_choose_home), stringResource(R.string.setup_choose), a.onHomeApp) }
+        SettingsAnchor("default-home") {
+            if (s.homeScreenEnabled) ActionRow(stringResource(R.string.setup_default_home),
+                s.defaultHomeLabel ?: stringResource(R.string.setup_choose_home), stringResource(R.string.setup_choose), a.onHomeApp)
+            else SettingsRow(stringResource(R.string.setup_default_home), "Enable Home screen above to choose DroidDeck as the default Home app.") {}
+        }
     }
     SettingsGroup(stringResource(R.string.setup_linux_apps)) {
         ToggleRow(host, "store-enabled", stringResource(R.string.setup_store),

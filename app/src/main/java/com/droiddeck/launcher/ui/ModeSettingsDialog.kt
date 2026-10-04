@@ -341,9 +341,10 @@ fun ModeSettingsContent(
                 onPick = a.onSuspendPolicy,
             )
         }
-        if (s.pipSupported) SettingsGroup(stringResource(R.string.pip_title)) {
-            ToggleRow(host, "pip-auto", stringResource(R.string.pip_auto), null,
-                s.pipAutoEnter, onChange = a.onPipAutoEnter)
+        SettingsGroup(stringResource(R.string.pip_title)) {
+            ToggleRow(host, "pip-auto", stringResource(R.string.pip_auto),
+                if (s.pipSupported) null else "Picture-in-picture is unavailable on this device.",
+                s.pipAutoEnter, enabled = s.pipSupported, onChange = a.onPipAutoEnter)
         }
         if (steam) SettingsGroup(stringResource(R.string.mode_startup)) {
             ToggleRow(
@@ -418,7 +419,9 @@ fun ModeSettingsContent(
                 s.steamDeckMode, onChange = a.onSteamDeckMode,
             )
             // Deck mode fixes the branch (SessionPrefs.steamChannel); the choice is for Deck mode off.
-            if (s.steamDeckMode) SettingsRow(stringResource(R.string.mode_branch), stringResource(R.string.mode_branch_deck)) {}
+            if (s.steamDeckMode) SettingsAnchor("channel") {
+                SettingsRow(stringResource(R.string.mode_branch), stringResource(R.string.mode_branch_deck)) {}
+            }
             else ChoiceRow(
                 host, "channel", stringResource(R.string.mode_branch), stringResource(R.string.mode_branch_hint),
                 listOf("publicbeta" to stringResource(R.string.mode_branch_public), "steamdeck_publicbeta" to stringResource(R.string.mode_branch_deck_beta)), s.steamChannel,
