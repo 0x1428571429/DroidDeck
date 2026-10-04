@@ -402,7 +402,7 @@ class SessionService : Service() {
                 guest.addAll(fastPathAt, env)
                 shellGuest.addAll(fastPathAt, env)
                 Log.i(TAG, "proot: fast path on (${prootBinds.size} binds)")
-            }
+            } ?: null.also { Log.w(TAG, "proot: fast path off, it cannot be told these ${prootBinds.size} binds") }
         } else null
 
         val command = LinuxRuntime.command(

@@ -48,7 +48,8 @@
 
 #define FP_STUB_ADDR 0xffff00000UL /* must match FASTPATH_STUB_ADDR in proot's seccomp.c */
 #define FP_STUB_SIZE 4096UL
-#define MAX_BINDS 64
+#define MAX_BINDS 256
+#define BIND_PATH 1024
 #define FP_SLOW (-100000L)
 
 typedef long (*stub_fn)(long nr, long a, long b, long c, long d, long e, long f);
@@ -87,14 +88,18 @@ static void stats(void) {
 }
 
 /* The canonical form of a host path (bindings may name /sdcard, /data/user/0, ...). */
-static void canonical(char *path, size_t size) {
+static int canonical(char *path, size_t size) {
   long fd = sc(SYS_openat, AT_FDCWD, (long)path, O_PATH | O_CLOEXEC, 0, 0);
-  if (fd < 0) return;
+  if (fd < 0) return 1;
   char link[40], out[PATH_MAX];
   snprintf(link, sizeof link, "/proc/self/fd/%ld", fd);
   long n = sc(SYS_readlinkat, AT_FDCWD, (long)link, (long)out, sizeof out - 1, 0);
   sc(SYS_close, fd, 0, 0, 0, 0);
-  if (n > 0 && (size_t)n < size) { out[n] = 0; memcpy(path, out, n + 1); }
+  if (n <= 0) return 1;
+  if ((size_t)n >= size) return 0;
+  out[n] = 0;
+  memcpy(path, out, n + 1);
+  return 1;
 }
 
 static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -162,30 +167,31 @@ static void fp_init(void) {
   snprintf(root, sizeof root, "%s", r);
   canonical(root, sizeof root);
   rootlen = strlen(root);
-  for (const char *s = b; s && *s && nbinds < MAX_BINDS;) {
+  static char hosts[MAX_BINDS][BIND_PATH], guests[MAX_BINDS][BIND_PATH];
+  for (const char *s = b; s && *s;) {
     const char *end = strchr(s, '|');
     size_t len = end ? (size_t)(end - s) : strlen(s);
-    char spec[2 * PATH_MAX];
-    if (len > 0 && len < sizeof spec) {
-      memcpy(spec, s, len);
-      spec[len] = 0;
-      char *colon = strchr(spec, ':');
-      if (colon) *colon = 0;
-      struct bind *bd = &binds[nbinds];
-      /* Canonicalised on first use: some (/sdcard) are FUSE, slow to look up at every exec.
-       * Static storage: malloc here would grow the heap with brk(2), which proot traps. */
-      static char hosts[MAX_BINDS][PATH_MAX], guests[MAX_BINDS][512];
-      const char *g = colon ? colon + 1 : spec;
-      if (strlen(g) >= sizeof guests[0]) { s = end ? end + 1 : NULL; continue; }
-      bd->host = hosts[nbinds];
-      bd->guest = guests[nbinds];
-      snprintf(bd->guest, sizeof guests[0], "%s", g);
-      snprintf(bd->host, PATH_MAX, "%.*s", PATH_MAX - 1, spec);
-      bd->hlen = strlen(bd->host);
-      bd->glen = strlen(bd->guest);
-      if (bd->guest[0] == '/' && bd->glen > 1 && bd->hlen > 0) nbinds++;
-    }
+    char spec[2 * BIND_PATH];
+    if (len >= sizeof spec) return;
+    memcpy(spec, s, len);
+    spec[len] = 0;
     s = end ? end + 1 : NULL;
+    if (len == 0) continue;
+    if (nbinds == MAX_BINDS) return;
+    char *colon = strchr(spec, ':');
+    if (colon) *colon = 0;
+    const char *g = colon ? colon + 1 : spec;
+    if (strlen(spec) >= BIND_PATH || strlen(g) >= BIND_PATH) return;
+    /* Canonicalised on first use: some (/sdcard) are FUSE, slow to look up at every exec.
+     * Static storage: malloc here would grow the heap with brk(2), which proot traps. */
+    struct bind *bd = &binds[nbinds];
+    bd->host = hosts[nbinds];
+    bd->guest = guests[nbinds];
+    snprintf(bd->guest, BIND_PATH, "%s", g);
+    snprintf(bd->host, BIND_PATH, "%s", spec);
+    bd->hlen = strlen(bd->host);
+    bd->glen = strlen(bd->guest);
+    if (bd->guest[0] == '/' && bd->glen > 1 && bd->hlen > 0) nbinds++;
   }
   pthread_atfork(NULL, NULL, after_fork); /* registered once per exec */
   fp_on = 1;
@@ -196,13 +202,16 @@ static pthread_mutex_t bind_lock = PTHREAD_MUTEX_INITIALIZER;
 static const struct bind *canon(struct bind *bd) {
   if (__atomic_load_n(&bd->canon, __ATOMIC_ACQUIRE)) return bd;
   if (pthread_mutex_trylock(&bind_lock) != 0) return NULL;
+  int ok = 1;
   if (!bd->canon) {
-    canonical(bd->host, PATH_MAX);
-    bd->hlen = strlen(bd->host);
-    __atomic_store_n(&bd->canon, 1, __ATOMIC_RELEASE);
+    ok = canonical(bd->host, BIND_PATH);
+    if (ok) {
+      bd->hlen = strlen(bd->host);
+      __atomic_store_n(&bd->canon, 1, __ATOMIC_RELEASE);
+    }
   }
   pthread_mutex_unlock(&bind_lock);
-  return bd;
+  return ok ? bd : NULL;
 }
 
 /* ---------------------------------------------------------------- verified parents */

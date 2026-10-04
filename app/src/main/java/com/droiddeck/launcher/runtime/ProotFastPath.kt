@@ -21,6 +21,8 @@ import java.security.MessageDigest
  */
 object ProotFastPath {
     const val LIBRARY = "/usr/local/lib/libblfastpath.so"
+    const val MAX_BINDS = 256
+    const val MAX_BIND_PATH = 1023
 
     fun enabled(context: Context): Boolean =
         SessionPrefs.prootFastPath(context) && !SessionPrefs.prootNoSeccomp(context)
@@ -28,6 +30,7 @@ object ProotFastPath {
     /** The key for this rootfs and these binds, or null when the library cannot be told them. */
     fun key(root: File, binds: List<String>): String? {
         if (binds.any { it.contains('|') } || root.path.contains('|')) return null
+        if (binds.size > MAX_BINDS || binds.any { spec -> spec.split(':', limit = 2).any { it.length > MAX_BIND_PATH } }) return null
         val digest = MessageDigest.getInstance("SHA-256")
             .digest((root.path + "\n" + binds.joinToString("\n")).toByteArray())
         return digest.take(12).joinToString("") { "%02x".format(it) }
