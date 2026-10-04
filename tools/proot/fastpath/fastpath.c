@@ -9,14 +9,15 @@
  *
  * It decides nothing proot would decide differently. The guest path is mapped literally - the
  * longest binding whose guest path is a prefix, else the rootfs - and the parent directory is
- * opened O_PATH and must come back from /proc/self/fd as exactly that host path, which proves no
- * component on the way was a symlink: proot would then have walked the same directories. The
- * last component is looked at without following it, and a symlink there goes to proot. So does
- * "..", a trailing "/", anything under /proc, any flag not handled here and any failure to
- * decide: the real libc call runs, proot traps it and answers as it always has.
+ * opened O_PATH and checked against /proc/self/fd. A case-only difference is accepted only on
+ * FUSE and only after each differently spelled component is verified as a directory rather than
+ * a symlink. The last component is looked at without following it; other symlinks go to proot.
+ * So do "..", a trailing "/", anything under /proc, any flag not handled here and any failure
+ * to decide: the real libc call runs, proot traps it and answers as it always has.
  *
  * Only syscalls Android's app seccomp policy allows are used (openat, newfstatat, statx,
- * faccessat, readlinkat, close) - not openat2 or faccessat2, which it answers with SIGSYS.
+ * faccessat, fstatfs, readlinkat, close) - not openat2 or faccessat2, which it answers with
+ * SIGSYS.
  *
  * Verified parents are remembered for PROOT_FP_TTL_MS (default 2000; 0 = verify every call): a
  * parent directory replaced by a symlink within that window would be missed, the same trade the
@@ -43,6 +44,8 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
+#include <sys/vfs.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -250,10 +253,27 @@ static long canonical_dir(const char *dir) {
   char link[40], out[PATH_MAX];
   snprintf(link, sizeof link, "/proc/self/fd/%ld", fd);
   long n = sc(SYS_readlinkat, AT_FDCWD, (long)link, (long)out, sizeof out - 1, 0);
-  sc(SYS_close, fd, 0, 0, 0, 0);
-  if (n <= 0) return 0;
+  if (n <= 0) { sc(SYS_close, fd, 0, 0, 0, 0); return 0; }
   out[n] = 0;
-  if (strcmp(out, dir) != 0) return 0;
+  if (strcmp(out, dir) != 0) {
+    struct statfs fs;
+    int fuse = sc(SYS_fstatfs, fd, (long)&fs, 0, 0, 0) == 0 && fs.f_type == 0x65735546;
+    sc(SYS_close, fd, 0, 0, 0, 0);
+    if (!fuse || strcasecmp(out, dir) != 0) return 0;
+    /* FUSE case aliases return the stored spelling from /proc/self/fd. Prove the final
+     * component and each parent so a case-only symlink path still goes to proot. */
+    struct stat st;
+    if (sc(SYS_newfstatat, AT_FDCWD, (long)dir, (long)&st, AT_SYMLINK_NOFOLLOW, 0) != 0 ||
+        !S_ISDIR(st.st_mode)) return 0;
+    char parent[PATH_MAX];
+    snprintf(parent, sizeof parent, "%s", dir);
+    char *slash = strrchr(parent, '/');
+    if (!slash || slash == parent) return 0;
+    *slash = 0;
+    if (canonical_dir(parent) != 1) return 0;
+  } else {
+    sc(SYS_close, fd, 0, 0, 0, 0);
+  }
   remember(dir, h);
   return 1;
 }
@@ -474,14 +494,16 @@ static int access_common(int dirfd, const char *path, int mode, int flags) {
   REAL(faccessat, int (*)(int, const char *, int, int));
   char host[PATH_MAX];
   struct stat st;
-  /* faccessat(2) has no flags: AT_EACCESS and AT_SYMLINK_NOFOLLOW stay with glibc and proot. */
-  long rs = flags == 0 ? resolve(dirfd, path, host) : FP_SLOW;
+  /* F_OK with AT_SYMLINK_NOFOLLOW asks only whether the last directory entry exists. */
+  int nofollow_exists = mode == F_OK && flags == AT_SYMLINK_NOFOLLOW;
+  long rs = flags == 0 || nofollow_exists ? resolve(dirfd, path, host) : FP_SLOW;
   if (rs == -ENOENT) { hits++; return ret(rs); }
   if (rs == 0) {
     long k = kind(host, &st);
-    if (k != 1) {
+    if (k != 1 || nofollow_exists) {
       hits++;
       if (k < 0) return ret(k);
+      if (nofollow_exists) return 0;
       return ret(sc(SYS_faccessat, AT_FDCWD, (long)host, mode, 0, 0));
     }
   }
