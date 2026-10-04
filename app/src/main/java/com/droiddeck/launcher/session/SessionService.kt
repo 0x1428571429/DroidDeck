@@ -812,9 +812,9 @@ class SessionService : Service() {
         } else {
             Log.i(TAG, "game storage: internal only")
         }
-        val removableLibrary = storageDiagnosticLibrary?.let {
-            runCatching { Environment.isExternalStorageRemovable(it) }.getOrDefault(false)
-        } ?: false
+        val removableLibrary = storageDiagnosticLibrary != null && library?.let {
+            runCatching { Environment.isExternalStorageRemovable(File(it.path)) }.getOrDefault(false)
+        } == true
         val truncateAllocationSupported = storageDiagnosticLibrary?.takeIf { removableLibrary }?.let {
             StorageDiagnostics.truncateReservesSpace(it)
         }
