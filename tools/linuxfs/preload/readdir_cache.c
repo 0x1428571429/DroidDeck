@@ -209,9 +209,11 @@ struct dirent64 *readdir64(DIR *dir) {
 }
 
 /* 32- and 64-bit dirent layouts are identical in the supported 64-bit runtimes. */
+#if __SIZEOF_POINTER__ == 8
 struct dirent *readdir(DIR *dir) {
     return (struct dirent *)readdir64(dir);
 }
+#endif
 
 int closedir(DIR *dir) {
     pthread_once(&hooks_once, init_hooks);
