@@ -223,7 +223,7 @@ internal fun Modifier.settingsTarget(id: String): Modifier =
 /** A non-stopping focus group that can reveal itself and request its first actionable child. */
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-fun SettingsAnchor(id: String, content: @Composable () -> Unit) {
+fun SettingsAnchor(id: String, modifier: Modifier = Modifier.fillMaxWidth(), content: @Composable () -> Unit) {
     val target = LocalSettingsTarget.current
     val enabled = LocalSettingsAnchorsEnabled.current
     if (!enabled) {
@@ -233,7 +233,7 @@ fun SettingsAnchor(id: String, content: @Composable () -> Unit) {
     val bringIntoView = remember { BringIntoViewRequester() }
     val focusRequester = remember { FocusRequester() }
     Column(
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier
             .bringIntoViewRequester(bringIntoView)
             .focusRequester(focusRequester)
             .focusGroup(),

@@ -26,4 +26,12 @@ class SettingsHistoryTest {
         assertNull(history.back().back().current)
     }
 
+    @Test fun specialistSearchesReturnToTheirCategoryLaunchControl() {
+        assertEquals("performance", settingsCategoryTarget("performance:gameCores"))
+        assertEquals("components", settingsCategoryTarget("default-proton"))
+        assertEquals("components", settingsCategoryTarget("editing-proton"))
+        assertEquals("controller-mapping", settingsCategoryTarget("controller-mapping"))
+        assertEquals("res", settingsCategoryTarget("res"))
+        assertNull(settingsCategoryTarget(null))
+    }
 }

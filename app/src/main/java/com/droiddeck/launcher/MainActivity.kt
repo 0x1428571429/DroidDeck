@@ -525,7 +525,8 @@ class MainActivity : ComponentActivity() {
                         settingsCategory = (settingsHistory.current as? SettingsDestination.Category)?.category,
                         settingsMode = sm ?: SessionService.MODE_STEAM,
                         settingsTarget = (settingsHistory.current as? SettingsDestination.Category)?.target
-                            ?: (settingsHistory.current as? SettingsDestination.Performance)?.target,
+                            ?: (settingsHistory.current as? SettingsDestination.Performance)?.target
+                            ?: (settingsHistory.current as? SettingsDestination.Components)?.target,
                         requestedRailTab = requestedRailTab,
                         theme = theme,
                         isHomeApp = homeAppSelected,
@@ -1018,10 +1019,10 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun openComponents(focusContent: Boolean = true, tab: String? = null) {
+    private fun openComponents(focusContent: Boolean = true, tab: String? = null, target: String? = null) {
         focusComponentsContent = focusContent
         if (tab != null) components.compComp = tab
-        settingsHistory = settingsHistory.open(SettingsDestination.Components(tab ?: components.compComp))
+        settingsHistory = settingsHistory.open(SettingsDestination.Components(tab ?: components.compComp, target))
         components.refreshComponents(snapshotFirst = true)
         drivers.refreshDrivers()
     }
@@ -1366,9 +1367,11 @@ class MainActivity : ComponentActivity() {
         val entry = com.droiddeck.launcher.ui.SettingsCatalog.entries.firstOrNull { it.target == target }
         val mode = entry?.mode ?: SessionService.MODE_STEAM
         refreshModeSettings(mode)
-        settingsHistory = settingsHistory.open(SettingsDestination.Category(category, mode, target))
+        val categoryTarget = com.droiddeck.launcher.ui.settingsCategoryTarget(target)
+        settingsHistory = settingsHistory.open(SettingsDestination.Category(category, mode, categoryTarget))
         when {
-            target == "components" || target == "default-proton" -> openComponents(true, "fex")
+            target == "components" -> openComponents(true, "fex")
+            target == "default-proton" || target == "editing-proton" -> openComponents(true, "fex", target)
             target == "gpu-drivers" -> openComponents(true, com.droiddeck.launcher.ui.GPU_TAB)
             target == "protons" -> openProtons()
             target == "controller-mapping" -> settingsHistory = settingsHistory.open(SettingsDestination.Mapping)

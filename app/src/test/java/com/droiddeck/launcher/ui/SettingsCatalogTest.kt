@@ -22,7 +22,8 @@ class SettingsCatalogTest {
     }
 
     @Test fun protonDefaultsInstalledBuildsAndComponentNamesRouteToTheirOwnPages() {
-        assertEquals(setOf("components"), targets("default proton"))
+        assertEquals(setOf("default-proton"), targets("default proton"))
+        assertEquals(setOf("editing-proton"), targets("component editing target"))
         assertEquals(setOf("protons"), targets("installed proton"))
         assertTrue(targets("DXVK").contains("components"))
         assertTrue(targets("VKD3D").contains("components"))

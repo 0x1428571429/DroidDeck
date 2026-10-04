@@ -1,5 +1,12 @@
 package com.droiddeck.launcher.ui
 
+/** A specialist search returns to the category control that opens that specialist. */
+internal fun settingsCategoryTarget(target: String?): String? = when {
+    target == "default-proton" || target == "editing-proton" -> "components"
+    target?.startsWith("performance:") == true -> "performance"
+    else -> target
+}
+
 sealed interface SettingsDestination {
     val key: String
 
@@ -11,7 +18,7 @@ sealed interface SettingsDestination {
         override val key = "settings:${category.name}:$mode:${target.orEmpty()}"
     }
 
-    data class Components(val tab: String? = null) : SettingsDestination {
+    data class Components(val tab: String? = null, val target: String? = null) : SettingsDestination {
         override val key = "components"
     }
 

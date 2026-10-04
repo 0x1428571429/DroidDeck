@@ -387,12 +387,13 @@ fun ModeSettingsContent(
                     ) { confirmDeckyRemoval = true }
                 }
             } }
-            if (s.deckyInstalled != null) ToggleRow(
+            ToggleRow(
                 host, "decky-enabled", stringResource(R.string.mode_decky),
-                if (s.deckyEnabled) stringResource(R.string.mode_decky_on)
+                if (s.deckyInstalled == null) "Install Decky Loader above to enable it."
+                else if (s.deckyEnabled) stringResource(R.string.mode_decky_on)
                 else stringResource(R.string.mode_decky_off),
                 s.deckyEnabled,
-                enabled = !s.deckySessionRunning && s.deckyStage == null,
+                enabled = s.deckyInstalled != null && !s.deckySessionRunning && s.deckyStage == null,
                 onChange = a.onDeckyEnabled,
             )
             SettingsAnchor("decky-plugins") { SettingsRow(

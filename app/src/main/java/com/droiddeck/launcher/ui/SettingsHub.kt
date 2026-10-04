@@ -1,6 +1,7 @@
 package com.droiddeck.launcher.ui
 
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,6 +40,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.droiddeck.launcher.core.PhantomProcessLimit
+import kotlinx.coroutines.flow.filterNotNull
 
 /** The settings taxonomy is shared by the hub, category pages, and the searchable index. */
 enum class SettingsCategory(val title: String, val description: String) {
@@ -129,6 +133,9 @@ object SettingsCatalog {
         SettingsEntry("controller", SettingsCategory.CONTROLS, "Controller type", "Choose the controller profile exposed to Steam", listOf("xbox", "steam deck"), "steam"),
         SettingsEntry("back-actions", SettingsCategory.CONTROLS, "Back-button actions", "Choose the order of the Steam menu and Quick Access Menu", listOf("b button", "menu button", "qam")),
         SettingsEntry("controller-mapping", SettingsCategory.CONTROLS, "Button mapping", "Remap controller buttons", listOf("mapping", "remap")),
+        SettingsEntry("controller-tint", SettingsCategory.CONTROLS, "Controller color", "Choose the on-screen controller color", listOf("tint")),
+        SettingsEntry("controller-layout", SettingsCategory.CONTROLS, "Controller layout", "Edit or reset the touch controller layout", listOf("custom layout")),
+        SettingsEntry("controller-reset", SettingsCategory.CONTROLS, "Reset controller settings", "Reset the on-screen controller configuration", listOf("reset all")),
         SettingsEntry("controller-opacity", SettingsCategory.CONTROLS, "Controller opacity", "Adjust the on-screen controller opacity", listOf("transparency")),
         SettingsEntry("controller-size", SettingsCategory.CONTROLS, "Controller size", "Adjust the on-screen controller size", listOf("scale")),
         SettingsEntry("controller-stick-click", SettingsCategory.CONTROLS, "Stick click", "Enable stick-click controls", listOf("l3", "r3")),
@@ -139,7 +146,7 @@ object SettingsCatalog {
         SettingsEntry("controller-keyboard", SettingsCategory.CONTROLS, "On-screen keyboard button", "Show the keyboard button on the virtual controller", listOf("keyboard")),
         SettingsEntry("controller-actions", SettingsCategory.CONTROLS, "Controller layout and mapping", "Edit the on-screen layout, remap buttons, or reset controller settings", listOf("color", "opacity", "size", "stick click", "adaptive sticks", "rumble", "steam button", "qam button", "keyboard button", "layout", "mapping", "reset")),
         SettingsEntry("da", SettingsCategory.AUDIO, "Direct audio", "Configure direct game audio", listOf("audio output"), "steam"),
-        SettingsEntry("clientAudio", SettingsCategory.AUDIO, "Steam client audio", "Choose Steam client audio mode", listOf("client audio"), "steam"),
+        SettingsEntry("clientAudio", SettingsCategory.AUDIO, "Steam-menu audio", "Choose the audio mode for Steam menus", listOf("client audio", "steam client audio"), "steam"),
         SettingsEntry("mic", SettingsCategory.AUDIO, "Microphone", "Allow session microphone input", listOf("recording", "voice chat"), "steam"),
         SettingsEntry("added-games", SettingsCategory.LIBRARY, "Added games", "Manage imported game folders and launch files", listOf("non-steam games", "exe"), "steam"),
         SettingsEntry("addedArt", SettingsCategory.LIBRARY, "Added game artwork", "Show artwork for imported games", listOf("game covers", "covers"), "steam"),
@@ -161,7 +168,9 @@ object SettingsCatalog {
         SettingsEntry("decky-enabled", SettingsCategory.SESSIONS, "Enable Decky Loader", "Start or stop Decky Loader with Steam", listOf("decky toggle"), "steam"),
         SettingsEntry("decky-loader", SettingsCategory.SESSIONS, "Decky installation", "Install or repair the Decky loader", listOf("decky install", "decky status"), "steam"),
         SettingsEntry("decky-plugins", SettingsCategory.SESSIONS, "Decky plugins", "Install a Decky plugin ZIP", listOf("plugin zip"), "steam"),
-        SettingsEntry("components", SettingsCategory.COMPATIBILITY, "Compatibility components", "Manage FEX, DXVK, and VKD3D-Proton", listOf("dxvk", "vkd3d", "fex", "default proton", "default-proton")),
+        SettingsEntry("components", SettingsCategory.COMPATIBILITY, "Compatibility components", "Manage FEX, DXVK, and VKD3D-Proton", listOf("dxvk", "vkd3d", "fex")),
+        SettingsEntry("default-proton", SettingsCategory.COMPATIBILITY, "Default Proton", "Choose the synchronized Steam default", listOf("default-proton")),
+        SettingsEntry("editing-proton", SettingsCategory.COMPATIBILITY, "Editing components for", "Choose which Proton build to edit", listOf("component editing target")),
         SettingsEntry("protons", SettingsCategory.COMPATIBILITY, "Proton versions", "Install and manage Proton builds", listOf("wine", "proton-ge", "installed proton")),
         SettingsEntry("performance", SettingsCategory.COMPATIBILITY, "Performance", "Tune CPU cores and graphics compatibility options", listOf("cpu", "cores", "zink", "fsync")),
         SettingsEntry("performance:override", SettingsCategory.COMPATIBILITY, "Per-app core limits", "Override the Steam client CPU core selection", listOf("client core override", "cpu affinity")),
@@ -199,6 +208,18 @@ private data class CategoryCard(val category: SettingsCategory, val icon: ImageV
 fun SettingsHub(s: FrontEndState, a: FrontEndActions) {
     var query by rememberSaveable { mutableStateOf("") }
     val frontFocus = LocalFrontFocus.current
+    var hasFocus by remember { mutableStateOf(false) }
+    var lastItem by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(frontFocus) {
+        snapshotFlow { if (hasFocus) frontFocus?.last else null }.filterNotNull().collect { lastItem = it }
+    }
+    LaunchedEffect(Unit) {
+        if (frontFocus != null) focusWithinFrames({ hasFocus }) {
+            val id = lastItem
+            if (id != null && (frontFocus.attached[id] ?: 0) > 0) frontFocus.items.getValue(id)
+            else frontFocus.primary
+        }
+    }
     DisposableEffect(frontFocus) {
         frontFocus?.let { it.primaryAttached++ }
         onDispose { frontFocus?.let { it.primaryAttached-- } }
@@ -214,7 +235,8 @@ fun SettingsHub(s: FrontEndState, a: FrontEndActions) {
         CategoryCard(SettingsCategory.SUPPORT, Icons.Outlined.HelpOutline),
     )
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxSize().onFocusChanged { hasFocus = it.hasFocus }.focusGroup()
+            .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         PageHeader("Settings")
@@ -304,7 +326,7 @@ private fun SettingsCategoryCard(card: CategoryCard, modifier: Modifier, onClick
             .padding(14.dp),
     ) {
         Icon(card.icon, contentDescription = null, tint = if (focused || hovered) pal.signal else colors.onSurfaceVariant, modifier = Modifier.size(22.dp))
-        Text(card.category.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colors.onBackground, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(card.category.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colors.onBackground, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(card.category.description, fontSize = 13.sp, color = colors.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }

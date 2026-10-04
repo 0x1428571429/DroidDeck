@@ -125,6 +125,7 @@ fun ComponentsPage(
     fun ask(title: String, body: String, verb: Int, action: () -> Unit) { confirmTitle = title; confirmVerb = verb; confirm = body to action }
     // The GPU drivers tab's Advanced pages: one driver list on its own, full page.
     var driverPage by remember { mutableStateOf<String?>(null) }
+    val gpuScroll = rememberScrollState()
     val gpuTab = comp == GPU_TAB
     when (driverPage) {
         "rt" -> {
@@ -182,7 +183,7 @@ fun ComponentsPage(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
         ) {
             if (view != null && !gpuTab) {
-                Column {
+                SettingsAnchor("default-proton", Modifier.widthIn(max = 300.dp)) { Column {
                     Text("Default Proton", fontSize = 12.sp, color = colors.onSurfaceVariant)
                     Box {
                         val defaultName = views.firstOrNull { it.proton.id == defaultProtonId }?.proton?.name ?: "Choose default"
@@ -196,8 +197,8 @@ fun ComponentsPage(
                             }
                         }
                     }
-                }
-                Column {
+                } }
+                SettingsAnchor("editing-proton", Modifier.widthIn(max = 300.dp)) { Column {
                     Text("Editing components for", fontSize = 12.sp, color = colors.onSurfaceVariant)
                     Box {
                         ValueChip(view.proton.name, protonMenu, modifier = Modifier.widthIn(max = 300.dp).heightIn(min = 44.dp)) { protonMenu = !protonMenu }
@@ -222,7 +223,7 @@ fun ComponentsPage(
                             }
                         }
                     }
-                }
+                } }
             }
             val tabs = listOf(GPU_TAB) + comps
             TabStrip(tabs.map { ComponentsManager.LABEL[it] ?: stringResource(R.string.comp_gpu_drivers) }, tabs.indexOf(comp).coerceAtLeast(0), { onComp(tabs[it]) })
@@ -253,7 +254,7 @@ fun ComponentsPage(
 
         // ---- the lists ------------------------------------------------------------------------------
         when {
-            gpuTab -> Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+            gpuTab -> Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(gpuScroll).padding(bottom = 16.dp)) {
                 GpuDriversPanel(gpu, gpuActions) { driverPage = it }
                 Row(modifier = Modifier.padding(top = 14.dp)) {
                     SmallButton(stringResource(R.string.comp_import_zip), onClick = gpuActions.onImportZip)
