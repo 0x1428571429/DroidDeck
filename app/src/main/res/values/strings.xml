@@ -203,7 +203,7 @@
     <string name="add_app_folder_copied">Its folder holds Linux programs, which shared storage cannot run, so it is copied into DroidDeck (%1$s).</string>
     <string name="add_app_confirm">Add</string>
     <string name="add_app_cancel">Cancel</string>
-    <string name="add_app_runtime_required">Install the Linux runtime from Setup first.</string>
+    <string name="add_app_runtime_required">Install the Linux runtime from Settings → Support &amp; diagnostics first.</string>
     <string name="add_app_busy">Wait for %1$s to finish.</string>
     <string name="steam_compat_label">Compatible</string>
     <string name="proton_compatible_note">Builds marked “%1$s” in Steam’s Compatibility menu have DroidDeck’s prefix fixes and start games here. The default is Proton Experimental ARM64 (%1$s), or Proton 11.0 ARM64 (%1$s) once that newer build is installed. Valve’s own Proton entries without the mark cannot start a game on this device.</string>
@@ -387,7 +387,7 @@
     <string name="comp_applies_next_game">Applies the next time a game starts</string>
     <string name="comp_import_zip">Import .zip</string>
     <string name="comp_reading">Reading Protons…</string>
-    <string name="comp_no_proton">No Proton installed yet. Start Steam once to download its ARM64 Proton, or add GE-Proton or CachyOS from Setup.</string>
+    <string name="comp_no_proton">No Proton installed yet. Start Steam once to download its ARM64 Proton, or add GE-Proton or CachyOS from Settings → Compatibility &amp; performance → Proton versions.</string>
     <string name="comp_original">Original · %1$s</string>
     <string name="comp_this_build">%1$s · this build</string>
     <string name="comp_earlier_build">%1$s · earlier build</string>
@@ -620,7 +620,7 @@
     <string name="store_title">Store</string>
     <string name="store_chip_flathub">Flathub · ARM64</string>
     <string name="store_chip_ready">● Flatpak ready</string>
-    <string name="store_needs_runtime">Install the Linux runtime from Setup first.</string>
+    <string name="store_needs_runtime">Install the Linux runtime from Settings → Support &amp; diagnostics first.</string>
     <string name="store_setup_title">Set up Flatpak</string>
     <string name="store_setup_text">Adds Flatpak and connects it to Flathub (about 20 MB). The first app also downloads its runtime.</string>
     <string name="store_setting_up">Setting up…</string>
@@ -840,7 +840,7 @@
     <string name="content_runtime_required">Runtime required</string>
     <string name="content_loading_details">Loading install details…</string>
     <string name="content_details_unavailable">Install details are unavailable. Try again later.</string>
-    <string name="content_needs_runtime">Install the Linux runtime from Setup first.</string>
+    <string name="content_needs_runtime">Install the Linux runtime from Settings → Support &amp; diagnostics first.</string>
     <string name="content_stop_first">Stop the running session to install desktop apps.</string>
     <string name="content_install_into">Installs %1$s into the Linux desktop.</string>
     <string name="store_busy_percent_short">%1$s · %2$d%%</string>

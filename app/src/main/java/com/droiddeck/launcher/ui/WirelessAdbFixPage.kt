@@ -178,7 +178,7 @@ fun WirelessAdbFixPage(
                 step == 2 -> stringResource(R.string.wadb_title_done)
                 else -> stringResource(R.string.wadb_title)
             },
-            eyebrow = stringResource(R.string.setup_title),
+            eyebrow = stringResource(R.string.settings_title),
             lede = when {
                 compactSplit && step == 0 -> stringResource(R.string.wadb_lede_compact0)
                 compactSplit && step == 1 -> stringResource(R.string.wadb_lede_compact1)

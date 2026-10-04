@@ -60,6 +60,12 @@ import com.droiddeck.launcher.ui.ControllerMappingPage
 import com.droiddeck.launcher.input.ControllerPrefs
 import com.droiddeck.launcher.input.ControllerEditorActivity
 import com.droiddeck.launcher.ui.FrontEndScreen
+import com.droiddeck.launcher.ui.SettingsCategory
+import com.droiddeck.launcher.ui.SettingsDestination
+import com.droiddeck.launcher.ui.SettingsHistory
+import com.droiddeck.launcher.ui.SettingsCategoryPage
+import com.droiddeck.launcher.ui.ModeSettingsContent
+import com.droiddeck.launcher.ui.MenuHost
 import com.droiddeck.launcher.ui.FrontEndState
 import com.droiddeck.launcher.ui.FrontEndActions
 import com.droiddeck.launcher.frontend.CoverArt
@@ -112,11 +118,11 @@ class MainActivity : ComponentActivity() {
     private var steamDeckMode by mutableStateOf(false)
     private var mangoapp by mutableStateOf(true)
     private var steamController by mutableStateOf(SessionPrefs.CONTROLLER_DECK)
-    private var showProtons by mutableStateOf(false)
+    private val showProtons get() = settingsHistory.current is SettingsDestination.Protons
     // Components page: FEX / DXVK / VKD3D-Proton per Proton (ComponentsManager).
-    private var showComponents by mutableStateOf(false)
+    private val showComponents get() = settingsHistory.current is SettingsDestination.Components
     private var focusComponentsContent by mutableStateOf(true)
-    private var showMapping by mutableStateOf(false)
+    private val showMapping get() = settingsHistory.current is SettingsDestination.Mapping
     private var saveBusy: String? = null
     /** What to do with the zip or folder the file picker hands back after a game page's Manage saves. */
     private var onSavePicked: ((File) -> Unit)? = null
@@ -130,7 +136,7 @@ class MainActivity : ComponentActivity() {
     private var desktopInstalled by mutableStateOf(false)
     private var offlineAccount by mutableStateOf<String?>(null)
     private var offline by mutableStateOf(false)
-    private var showPerformance by mutableStateOf(false)
+    private val showPerformance get() = settingsHistory.current is SettingsDestination.Performance
     private var clientOverride by mutableStateOf(false)
     private var clientCores by mutableStateOf<Set<Int>>(emptySet())
     private var gameCores by mutableStateOf<Set<Int>>(emptySet())
@@ -303,7 +309,9 @@ class MainActivity : ComponentActivity() {
         }
     }
     // The mode whose settings dialog is open, with what it shows; refreshed by openModeSettings().
-    private var settingsMode by mutableStateOf<String?>(null)
+    private var settingsHistory by mutableStateOf(SettingsHistory())
+    private val settingsMode get() = (settingsHistory.current as? SettingsDestination.Category)?.mode
+    private var requestedRailTab by mutableStateOf<String?>(null)
     private var resolutionCap by mutableStateOf(1080)
     private var customResolution by mutableStateOf<Pair<Int, Int>?>(null)
     private var fexPreset by mutableStateOf("")
@@ -493,7 +501,7 @@ class MainActivity : ComponentActivity() {
             com.droiddeck.launcher.ui.FocusGlideHost(androidx.compose.ui.Modifier.fillMaxSize()) {
                 val sm = settingsMode
                 val page: (@Composable () -> Unit)? = when {
-                    sm != null -> { { ModeSettingsHost(sm) } }
+                    sm != null -> null
                     showPerformance -> { { PerformanceHost() } }
                     showProtons -> { { ProtonHost() } }
                     showComponents -> { { ComponentsHost() } }
@@ -514,7 +522,12 @@ class MainActivity : ComponentActivity() {
                         steamGames = steamGames, emulators = emulatorList, running = runningLabel,
                         frameGen = FrameGen.mode(this),
                         lossless = lossless,
-                        pageKey = sm?.let { "settings:$it" } ?: if (showPerformance) "performance" else if (showProtons) "protons" else if (showComponents) "components" else if (showMapping) "controller-mapping" else null,
+                        pageKey = settingsHistory.current?.key,
+                        settingsCategory = (settingsHistory.current as? SettingsDestination.Category)?.category,
+                        settingsMode = sm ?: SessionService.MODE_STEAM,
+                        settingsTarget = (settingsHistory.current as? SettingsDestination.Category)?.target
+                            ?: (settingsHistory.current as? SettingsDestination.Performance)?.target,
+                        requestedRailTab = requestedRailTab,
                         theme = theme,
                         isHomeApp = homeAppSelected,
                         homeScreenEnabled = homeScreenEnabled,
@@ -609,7 +622,7 @@ class MainActivity : ComponentActivity() {
                         // A game page's Manage saves: the game's Proton and saves are read when the work runs, off the main thread.
                         onSaveImport = { sg -> importSaves(sg.name) { GameSaves.game(sg) } },
                         onSaveExport = { sg, layout -> exportSaves(sg.name, layout) { GameSaves.game(sg) } },
-                        onPerformance = { refreshCores(); showProtons = false; showComponents = false; showMapping = false; showPerformance = true },
+                        onPerformance = { refreshCores(); settingsHistory = settingsHistory.open(SettingsDestination.Performance()) },
                         onRoms = { showRoms = true },
                         onFiles = { startActivity(Intent(this, com.droiddeck.launcher.files.FileManagerActivity::class.java)) },
                         onBrowseFiles = { dir ->
@@ -643,7 +656,18 @@ class MainActivity : ComponentActivity() {
                             OfflineMode.setEnabled(this, !OfflineMode.enabled(this))
                             offline = OfflineMode.enabled(this)
                         },
-                        onPageBack = { settingsMode = null; showPerformance = false; showProtons = false; showComponents = false; showMapping = false },
+                        onPageBack = { settingsBack() },
+                        onCloseSettings = { settingsHistory = SettingsHistory() },
+                        onSettingsCategory = { category, target -> openSettingsCategory(category, target) },
+                        onSettingsMode = { mode ->
+                            val destination = settingsHistory.current as? SettingsDestination.Category
+                            if (destination != null) {
+                                refreshModeSettings(mode)
+                                settingsHistory = settingsHistory.replace(destination.copy(mode = mode, target = null))
+                            }
+                        },
+                        onOpenUpdates = { settingsHistory = SettingsHistory(); requestedRailTab = "updates" },
+                        onRailTabHandled = { requestedRailTab = null },
                         onTheme = { id -> SessionPrefs.setTheme(this, id); theme = id },
                         onLauncherFullscreen = { on ->
                             SessionPrefs.setLauncherFullscreen(this, on)
@@ -730,11 +754,18 @@ class MainActivity : ComponentActivity() {
                             onKeyboardButton = { on -> ControllerPrefs.setKeyboardButton(this, on); refreshController() },
                             onEditLayout = { startActivity(Intent(this, ControllerEditorActivity::class.java)) },
                             onResetLayout = { ControllerPrefs.resetAllLayouts(this); refreshController() },
-                            onMapping = { settingsMode = null; showPerformance = false; showProtons = false; showComponents = false; showMapping = true },
+                            onMapping = { settingsHistory = settingsHistory.open(SettingsDestination.Mapping) },
                             onResetAll = { ControllerPrefs.resetAll(this); refreshController() },
                         ),
                     ),
                     page = page,
+                    settingsContent = { s, a, openDeveloperOptions, requestWirelessAdb ->
+                        s.settingsCategory?.let { category ->
+                            SettingsCategoryPage(s, a, category, s.settingsMode, s.settingsTarget, openDeveloperOptions, requestWirelessAdb) { host ->
+                                ModeSettingsHost(s.settingsMode, category, host)
+                            }
+                        }
+                    },
                 )
                 }
                 if (showRoms) RomsDialog(
@@ -969,11 +1000,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openProtons() {
-        settingsMode = null
-        showPerformance = false
-        showComponents = false
-        showMapping = false
-        showProtons = true
+        settingsHistory = settingsHistory.open(SettingsDestination.Protons)
         protons.refreshProtons()
     }
 
@@ -988,18 +1015,14 @@ class MainActivity : ComponentActivity() {
             mapping = settings.mapping,
             onPick = { id, target -> ControllerPrefs.setTarget(this, id, target); refreshController() },
             onReset = { ControllerPrefs.resetMapping(this); refreshController() },
-            onBack = { showMapping = false },
+            onBack = { settingsBack() },
         )
     }
 
     private fun openComponents(focusContent: Boolean = true, tab: String? = null) {
         focusComponentsContent = focusContent
         if (tab != null) components.compComp = tab
-        settingsMode = null
-        showPerformance = false
-        showProtons = false
-        showMapping = false
-        showComponents = true
+        settingsHistory = settingsHistory.open(SettingsDestination.Components(tab ?: components.compComp))
         components.refreshComponents(snapshotFirst = true)
         drivers.refreshDrivers()
     }
@@ -1025,8 +1048,15 @@ class MainActivity : ComponentActivity() {
             busy = if (busy) stage else components.compBusy,
             downloads = components.compDownloads,
             requestInitialFocus = focusComponentsContent,
-            onProton = { components.chooseProton(it) },
-            onComp = { components.compComp = it },
+            onProton = { components.compProton = it },
+            defaultProtonId = components.defaultProtonId,
+            onDefaultProton = { components.chooseProton(it) },
+            onComp = { tab ->
+                components.compComp = tab
+                if (settingsHistory.current is SettingsDestination.Components) {
+                    settingsHistory = settingsHistory.replace(SettingsDestination.Components(tab))
+                }
+            },
             onSwap = { file -> components.compProton?.let { pid -> components.componentAction("Swapping") { ComponentsManager.swap(this, pid, file) } } },
             onRestore = { version -> components.compProton?.let { pid -> components.componentAction("Restoring") { ComponentsManager.restore(this, pid, components.compComp, version) } } },
             onCancelQueued = { components.compProton?.let { pid -> components.componentAction("Cancelling") { ComponentsManager.cancelQueued(this, pid, components.compComp); "The waiting swap was cancelled." } } },
@@ -1035,7 +1065,7 @@ class MainActivity : ComponentActivity() {
             onDownload = { components.downloadComponent(it) },
             onRefresh = { components.refreshComponentCatalog() },
             onImport = { pickComponent.launch(InAppFilePicker.buildIntent(this, WCP_EXT, "Choose a component package (-linux .wcp)")) },
-            onBack = { showComponents = false },
+            onBack = { settingsBack() },
             gpu = drivers.state(),
             gpuActions = com.droiddeck.launcher.ui.GpuDriversActions(
                 onAuto = { on -> drivers.setMode(on) },
@@ -1067,7 +1097,7 @@ class MainActivity : ComponentActivity() {
             onInstall = { id -> protons.installProton(id) },
             onCancel = { id -> ProtonExtras.tools.firstOrNull { it.id == id }?.let { ProtonExtras.unqueue(this, it) }; protons.refreshProtons() },
             onRemove = { id -> protons.removeProton(id) },
-            onBack = { showProtons = false },
+            onBack = { settingsBack() },
         )
     }
 
@@ -1114,8 +1144,8 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun ModeSettingsHost(mode: String) {
-        ModeSettingsPage(
+    private fun ModeSettingsHost(mode: String, category: SettingsCategory, host: MenuHost) {
+        ModeSettingsContent(
             ModeSettings(
                 mode = mode, resolutionCap = resolutionCap, customResolution = customResolution, shapeMode = shapeMode,
                 hdr = hdrOn, hdrReason = hdrReason, fpsLimit = fpsLimit,
@@ -1248,8 +1278,13 @@ class MainActivity : ComponentActivity() {
                 onPickDeckyPluginZip = {
                     pickDeckyPluginZip.launch(InAppFilePicker.buildIntent(this, ZIP_EXT, "Choose a Decky plugin ZIP"))
                 },
-                onDismiss = { settingsMode = null },
+                onDismiss = { settingsBack() },
             ),
+            category = category,
+            host = host,
+        )
+        if (category == SettingsCategory.DISPLAY) com.droiddeck.launcher.ui.GraphicsSettingsContent(
+            host, upscaler, { value -> SessionPrefs.setUpscaler(this, value); upscaler = value },
         )
     }
 
@@ -1278,7 +1313,7 @@ class MainActivity : ComponentActivity() {
             onGpuClockPin = { on -> SessionPrefs.setGpuClockPin(this, on); gpuClockPin = on },
             onProotNoSeccomp = { on -> SessionPrefs.setProotNoSeccomp(this, on); prootNoSeccomp = on },
             onProotFastPath = { on -> SessionPrefs.setProotFastPath(this, on); prootFastPath = on },
-            onGuestHostname = { name -> SessionPrefs.setGuestHostname(this, name) },
+            onGuestHostname = { name -> SessionPrefs.setGuestHostname(this, name); guestHostname = SessionPrefs.guestHostname(this) },
             onClientCore = { core, on ->
                 clientCores = if (on) clientCores + core else clientCores - core
                 SessionPrefs.setClientCpus(this, CpuCores.format(clientCores))
@@ -1287,7 +1322,7 @@ class MainActivity : ComponentActivity() {
                 gameCores = if (on) gameCores + core else gameCores - core
                 SessionPrefs.setGameCpus(this, CpuCores.format(gameCores))
             },
-            onDismiss = { showPerformance = false },
+            onDismiss = { settingsBack() },
         )
     }
 
@@ -1324,11 +1359,42 @@ class MainActivity : ComponentActivity() {
     private var pipAutoEnter by mutableStateOf(false)
 
     private fun openModeSettings(mode: String) {
+        refreshModeSettings(mode)
+        settingsHistory = settingsHistory.open(SettingsDestination.Category(SettingsCategory.SESSIONS, mode))
+    }
+
+    private fun openSettingsCategory(category: SettingsCategory, target: String?) {
+        val entry = com.droiddeck.launcher.ui.SettingsCatalog.entries.firstOrNull { it.target == target }
+        val mode = entry?.mode ?: SessionService.MODE_STEAM
+        refreshModeSettings(mode)
+        settingsHistory = settingsHistory.open(SettingsDestination.Category(category, mode, target))
+        when {
+            target == "components" || target == "default-proton" -> openComponents(true, "fex")
+            target == "gpu-drivers" -> openComponents(true, com.droiddeck.launcher.ui.GPU_TAB)
+            target == "protons" -> openProtons()
+            target == "controller-mapping" -> settingsHistory = settingsHistory.open(SettingsDestination.Mapping)
+            target == "performance" || target?.startsWith("performance:") == true -> {
+                refreshCores()
+                settingsHistory = settingsHistory.open(SettingsDestination.Performance(target?.substringAfter("performance:", "")?.ifEmpty { null }))
+            }
+        }
+    }
+
+    private fun settingsBack() {
+        settingsHistory = settingsHistory.back()
+        when (val destination = settingsHistory.current) {
+            is SettingsDestination.Category -> refreshModeSettings(destination.mode)
+            is SettingsDestination.Components -> {
+                destination.tab?.let { components.compComp = it }
+                components.refreshComponents(snapshotFirst = true)
+                drivers.refreshDrivers()
+            }
+            else -> Unit
+        }
+    }
+
+    private fun refreshModeSettings(mode: String) {
         pipAutoEnter = SessionPrefs.pipAutoEnter(this)
-        showPerformance = false
-        showProtons = false
-        showComponents = false
-        showMapping = false
         resolutionCap = SessionPrefs.resolutionCap(this, mode)
         customResolution = SessionPrefs.customResolution(this, mode)
         fexPreset = SessionPrefs.fexPreset(this)
@@ -1360,7 +1426,6 @@ class MainActivity : ComponentActivity() {
         renderer = SessionPrefs.desktopRenderer(this)
         gameStorage = SessionPrefs.gameStorage(this)
         storageDiagnostics = SessionPrefs.storageDiagnosticsEnabled(this)
-        settingsMode = mode
         // The page opens at once, on what was last read; the slow part (driver files, a walk of the
         // added-games folders, the storage volumes) lands while it animates in.
         Thread({

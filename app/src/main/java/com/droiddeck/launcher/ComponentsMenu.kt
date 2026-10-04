@@ -14,6 +14,7 @@ import com.droiddeck.launcher.session.ProtonDefault
  */
 internal class ComponentsMenu(private val activity: android.app.Activity, private val ui: android.os.Handler) {
     var compSnapshot by mutableStateOf<ComponentsManager.Snapshot?>(null)
+    var defaultProtonId by mutableStateOf<String?>(null)
     var compCatalog by mutableStateOf<List<ComponentsManager.CatalogItem>>(emptyList())
     var compCatalogAt by mutableStateOf(0L)
     var compProton by mutableStateOf<String?>(null)
@@ -21,7 +22,6 @@ internal class ComponentsMenu(private val activity: android.app.Activity, privat
     var compChecking by mutableStateOf(false)
     var compBusy by mutableStateOf<String?>(null)
     var compDownloads by mutableStateOf<Map<String, Int>>(emptyMap())
-    private var shownDefault: String? = null
 
     /** Reads the Protons (and on first open saves their originals) off the UI thread; the Nightlies list comes from its cache. */
     fun refreshComponents(snapshotFirst: Boolean = false) {
@@ -33,11 +33,9 @@ internal class ComponentsMenu(private val activity: android.app.Activity, privat
             val chosen = snap?.let { s -> runCatching { ProtonDefault.selectedId(activity, s.protons.map { it.proton }) }.getOrNull() }
             ui.post {
                 compSnapshot = snap ?: ComponentsManager.Snapshot(emptyList(), emptyList())
+                defaultProtonId = chosen
                 if (cat != null && cat.fetchedAt > 0) { compCatalog = cat.items; compCatalogAt = cat.fetchedAt }
-                if (chosen != null && chosen != shownDefault) {
-                    shownDefault = chosen
-                    compProton = chosen
-                } else if (compProton == null || snap?.protons?.none { it.proton.id == compProton } == true) {
+                if (compProton == null || snap?.protons?.none { it.proton.id == compProton } == true) {
                     compProton = chosen ?: snap?.protons?.firstOrNull()?.proton?.id
                 }
             }
@@ -46,7 +44,6 @@ internal class ComponentsMenu(private val activity: android.app.Activity, privat
 
     fun chooseProton(id: String) {
         val proton = compSnapshot?.protons?.firstOrNull { it.proton.id == id }?.proton ?: return
-        compProton = id
         Thread({
             val message = runCatching {
                 when (ProtonDefault.request(activity, proton)) {
@@ -55,7 +52,10 @@ internal class ComponentsMenu(private val activity: android.app.Activity, privat
                     ProtonDefault.Outcome.NOT_RUNNABLE -> activity.getString(R.string.comp_default_not_runnable, proton.name)
                 }
             }.getOrElse { e -> activity.getString(R.string.comp_default_failed, e.message ?: e.javaClass.simpleName) }
-            ui.post { android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_LONG).show() }
+            ui.post {
+                android.widget.Toast.makeText(activity, message, android.widget.Toast.LENGTH_LONG).show()
+                refreshComponents()
+            }
         }, "components-default").start()
     }
 

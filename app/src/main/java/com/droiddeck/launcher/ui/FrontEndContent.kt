@@ -119,6 +119,7 @@ internal fun Pane(
         val pal = LocalPalette.current
         // Pages keep drawing while they leave, so one can fold away instead of blinking out.
         val pages = remember { HashMap<String, @Composable () -> Unit>() }
+        val savedPages = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
         // Pages opened from a control (the cog), with where that control sat, in this pane's coordinates.
         val origins = remember { HashMap<String, Origin>() }
         val paneAt = remember { arrayOf(Offset.Zero) }
@@ -154,6 +155,7 @@ internal fun Pane(
             label = "pane",
         ) { key ->
             val shown = if (page != null && key == s.pageKey) page else pages[key]
+            savedPages.SaveableStateProvider(key) {
             if (shown != null) {
                 DisposableEffect(key) { onDispose { if (key != livePage) { pages.remove(key); origins.remove(key) } } }
                 val from = origins[key]
@@ -168,6 +170,7 @@ internal fun Pane(
                 }
             }
             else Content(s, if (key == "games") gameShown[0] else key, a, Modifier.fillMaxSize(), onSelect, onAndroidAppClick, onOpenDeveloperOptions, onRequestWirelessAdb)
+            }
         }
       }
     }
@@ -209,10 +212,10 @@ private fun Content(
     val narrow = LocalNarrowPane.current
     val padH = if (narrow) 16.dp else 22.dp
     val padV = if (narrow) 12.dp else 18.dp
-    // Setup scrolls inside itself, under its tabs.
-    if (selected == "setup") {
+    // Settings has its own search and scrolling.
+    if (selected == "settings") {
         Column(modifier = modifier.padding(horizontal = padH, vertical = padV)) {
-            SetupPanel(s, a, onOpenDeveloperOptions, onRequestWirelessAdb)
+            SettingsHub(s, a)
         }
         return
     }

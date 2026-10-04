@@ -10,6 +10,10 @@ import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -56,10 +60,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -95,6 +101,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
@@ -201,6 +208,77 @@ private fun BumperKey(label: String, description: String, onClick: () -> Unit) {
 
 /** The narrowest a setting's value box gets; the session menu's sheet sets it lower. */
 val LocalChipMinWidth = androidx.compose.runtime.compositionLocalOf { 150.dp }
+
+/** Search destination for settings. A target names a [SettingsAnchor] id; null leaves focus alone. */
+val LocalSettingsTarget = staticCompositionLocalOf<String?> { null }
+
+/** Enables anchors only on searchable settings category pages. */
+val LocalSettingsAnchorsEnabled = staticCompositionLocalOf { false }
+internal val LocalSettingsAnchorId = staticCompositionLocalOf<String?> { null }
+
+@Composable
+internal fun Modifier.settingsTarget(id: String): Modifier =
+    if (LocalSettingsAnchorsEnabled.current) paneItem("setting:$id") else this
+
+/** A non-stopping focus group that can reveal itself and request its first actionable child. */
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
+fun SettingsAnchor(id: String, content: @Composable () -> Unit) {
+    val target = LocalSettingsTarget.current
+    val enabled = LocalSettingsAnchorsEnabled.current
+    if (!enabled) {
+        content()
+        return
+    }
+    val bringIntoView = remember { BringIntoViewRequester() }
+    val focusRequester = remember { FocusRequester() }
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .bringIntoViewRequester(bringIntoView)
+            .focusRequester(focusRequester)
+            .focusGroup(),
+    ) {
+        CompositionLocalProvider(LocalSettingsAnchorId provides id) { content() }
+    }
+    LaunchedEffect(target, id) {
+        if (target == id) {
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { bringIntoView.bringIntoView() }
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+}
+
+/** An optional group that starts closed; a settings search opens it so its destination can focus. */
+@Composable
+fun SettingsAdvanced(
+    id: String,
+    title: String,
+    targets: Set<String> = emptySet(),
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val target = LocalSettingsTarget.current
+    val expandsForTarget = target == id || target in targets
+    var expanded by rememberSaveable(id, target) { mutableStateOf(expandsForTarget) }
+    SettingsAnchor(id) {
+        SettingsGroup(title) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp),
+            ) {
+                SecondaryButton(
+                    stringResource(if (expanded) R.string.common_hide else R.string.common_show),
+                    compact = true,
+                    modifier = Modifier.settingsTarget(id),
+                    onClick = { expanded = !expanded },
+                )
+            }
+            if (expanded) content()
+        }
+    }
+}
 
 class MenuHost {
     var open by mutableStateOf<String?>(null)
@@ -319,7 +397,9 @@ fun ValueChip(text: String, open: Boolean, enabled: Boolean = true, modifier: Mo
     val rot by animateFloatAsState(if (open) 180f else 0f, Motion.sp(0.6f), label = "chipCaret")
     Row(
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = modifier
+        modifier = modifier.then(
+            LocalSettingsAnchorId.current?.let { Modifier.settingsTarget(it) } ?: Modifier,
+        )
             .widthIn(min = LocalChipMinWidth.current)
             .heightIn(min = 44.dp)
             .clip(RoundedCornerShape(10.dp))
@@ -400,14 +480,19 @@ fun <T> ChoiceRow(
     onPick: (T) -> Unit,
 ) {
     val open = host.open == key
-    SettingsRow(label, hint, highlighted = open, hintLines = hintLines) {
-        Box {
-            ValueChip(options.firstOrNull { it.first == selected }?.second ?: "-", open, enabled, modifier = chipModifier) { host.open = if (open) null else key }
-            AnchoredMenu(open, onDismiss = { if (host.open == key) host.open = null }, title = label, note = note) { firstItemFocus ->
-                options.forEachIndexed { index, (value, text) ->
-                    MenuItem(text, checked = value == selected, focusRequester = if (index == 0) firstItemFocus else null) {
-                        onPick(value)
-                        host.open = null
+    SettingsAnchor(key) {
+        SettingsRow(label, hint, highlighted = open, hintLines = hintLines) {
+            Box {
+                ValueChip(
+                    options.firstOrNull { it.first == selected }?.second ?: "-", open, enabled,
+                    modifier = chipModifier,
+                ) { host.open = if (open) null else key }
+                AnchoredMenu(open, onDismiss = { if (host.open == key) host.open = null }, title = label, note = note) { firstItemFocus ->
+                    options.forEachIndexed { index, (value, text) ->
+                        MenuItem(text, checked = value == selected, focusRequester = if (index == 0) firstItemFocus else null) {
+                            onPick(value)
+                            host.open = null
+                        }
                     }
                 }
             }
@@ -416,10 +501,13 @@ fun <T> ChoiceRow(
 }
 
 @Composable
-fun ToggleRow(host: MenuHost, key: String, label: String, hint: String?, checked: Boolean, enabled: Boolean = true, chipModifier: Modifier = Modifier, onChange: (Boolean) -> Unit) =
-    SettingsRow(label, hint) {
-        ToggleSwitch(checked, enabled, label, chipModifier) { host.open = null; onChange(it) }
+fun ToggleRow(host: MenuHost, key: String, label: String, hint: String?, checked: Boolean, enabled: Boolean = true, chipModifier: Modifier = Modifier, onChange: (Boolean) -> Unit) {
+    SettingsAnchor(key) {
+        SettingsRow(label, hint) {
+            ToggleSwitch(checked, enabled, label, chipModifier.settingsTarget(key)) { host.open = null; onChange(it) }
+        }
     }
+}
 
 /** An on/off switch: one tap or one A press flips it, where a menu of On and Off took three. */
 @Composable

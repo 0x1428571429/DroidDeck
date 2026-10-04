@@ -100,6 +100,10 @@ class FrontEndState(
     val shortcutLibraryScanning: Boolean = false,
     val gameSyncFolder: String? = null,
     val pageKey: String? = null,
+    val settingsCategory: SettingsCategory? = null,
+    val settingsMode: String = "steam",
+    val settingsTarget: String? = null,
+    val requestedRailTab: String? = null,
     val theme: String = Themes.GRAPHITE,
     val isHomeApp: Boolean = false,
     val homeScreenEnabled: Boolean = false,
@@ -122,7 +126,7 @@ class FrontEndState(
     val showPhantomGate: Boolean = false,
     val launcherFullscreen: Boolean = true,
     val animationsEnabled: Boolean = true,
-    /** The Flathub Store, a beta the user turns on in Setup. */
+    /** The Flathub Store, a beta the user turns on in Settings. */
     val storeEnabled: Boolean = false,
     /** The Updates page: DroidDeck's own builds and the channel followed. */
     val updates: UpdatesState = UpdatesState(),
@@ -167,6 +171,11 @@ class FrontEndActions(
     val onClearLogs: () -> Unit = {},
     val onOffline: () -> Unit,
     val onPageBack: () -> Unit = {},
+    val onCloseSettings: () -> Unit = {},
+    val onSettingsCategory: (SettingsCategory, String?) -> Unit = { _, _ -> },
+    val onSettingsMode: (String) -> Unit = {},
+    val onOpenUpdates: () -> Unit = {},
+    val onRailTabHandled: () -> Unit = {},
     val onTheme: (String) -> Unit = {},
     val onLauncherFullscreen: (Boolean) -> Unit = {},
     val onAnimationsEnabled: (Boolean) -> Unit = {},
@@ -338,14 +347,22 @@ internal suspend fun focusWithinFrames(done: () -> Boolean, target: () -> FocusR
 }
 
 @Composable
-fun FrontEndScreen(s: FrontEndState, a: FrontEndActions, page: (@Composable () -> Unit)? = null) {
+fun FrontEndScreen(
+    s: FrontEndState,
+    a: FrontEndActions,
+    page: (@Composable () -> Unit)? = null,
+    settingsContent: (@Composable (FrontEndState, FrontEndActions, () -> Unit, (Boolean) -> Unit) -> Unit)? = null,
+) {
     val frontFocus = remember { FrontFocus() }
-    CompositionLocalProvider(LocalFrontFocus provides frontFocus) { FrontEndScreenBody(s, a, page, frontFocus) }
+    CompositionLocalProvider(LocalFrontFocus provides frontFocus) { FrontEndScreenBody(s, a, page, frontFocus, settingsContent) }
 }
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun FrontEndScreenBody(s: FrontEndState, a: FrontEndActions, page: (@Composable () -> Unit)?, frontFocus: FrontFocus) {
+private fun FrontEndScreenBody(
+    s: FrontEndState, a: FrontEndActions, externalPage: (@Composable () -> Unit)?, frontFocus: FrontFocus,
+    settingsContent: (@Composable (FrontEndState, FrontEndActions, () -> Unit, (Boolean) -> Unit) -> Unit)?,
+) {
     var selected by rememberSaveable { mutableStateOf(if (s.shortcutPicker) "games" else "steam") }
     LaunchedEffect(s.shortcutPicker) { if (s.shortcutPicker) selected = "games" }
     var showWirelessAdbFix by rememberSaveable { mutableStateOf(false) }
@@ -365,6 +382,14 @@ private fun FrontEndScreenBody(s: FrontEndState, a: FrontEndActions, page: (@Com
         wirelessAdbDesiredEnabled = enabled
         showWirelessAdbFix = true
     }
+    val page: (@Composable () -> Unit)? = if (s.settingsCategory != null && settingsContent != null) {
+        { settingsContent(s, a, requestDeveloperOptions, requestWirelessAdbFix) }
+    } else externalPage?.let { content ->
+        { CompositionLocalProvider(LocalSettingsTarget provides s.settingsTarget, LocalSettingsAnchorsEnabled provides true) { content() } }
+    }
+    LaunchedEffect(s.requestedRailTab) {
+        s.requestedRailTab?.let { selected = it; a.onRailTabHandled() }
+    }
     LaunchedEffect(s.showPhantomGate, s.phantomProcessStatus) {
         if (phantomGateVisible) {
             while (true) {
@@ -383,7 +408,7 @@ private fun FrontEndScreenBody(s: FrontEndState, a: FrontEndActions, page: (@Com
         selected = if (selected.startsWith("rom:")) "emu:" + selected.removePrefix("rom:").substringBefore(':') else "desktop"
     }
     LaunchedEffect(s.isHomeApp) { if (!s.isHomeApp && selected == "android-apps") selected = "steam" }
-    // The Store turned off in Setup takes its page with it.
+    // The Store turned off in Settings takes its page with it.
     LaunchedEffect(s.storeEnabled) { if (!s.storeEnabled && selected == "store") selected = "steam" }
     // The last game uninstalled leaves the Games tab on its empty state.
     LaunchedEffect(s.steamGames.isEmpty()) {
@@ -392,23 +417,15 @@ private fun FrontEndScreenBody(s: FrontEndState, a: FrontEndActions, page: (@Com
     remember { Motion.refresh(ctx); true }
 
     val railSelection = when {
-        s.pageKey == "performance" || s.pageKey == "protons" || s.pageKey == "controller-mapping" -> "setup"
-        s.pageKey?.startsWith("settings:steam") == true -> "steam"
-        s.pageKey?.startsWith("settings:") == true -> "desktop"
+        s.pageKey != null -> "settings"
         selected.startsWith("app:") -> "games"
         selected.startsWith("emu:") || selected.startsWith("rom:") || selected.startsWith("user:") -> "desktop"
-        else -> s.pageKey ?: selected
+        else -> selected
     }
-    // Bumped each time a rail item is picked, so a controller moves on into the new page.
     var railPicks by remember { mutableStateOf(0) }
-    val showRailPage: (String, Boolean) -> Unit = { key, focusContent ->
-        // Components is a full page like Protons or Performance, opened over the current rail
-        // selection rather than replacing it.
-        if (key == "components") a.onComponents(focusContent)
-        else {
-            if (s.pageKey != null) a.onPageBack()
-            selected = key
-        }
+    val showRailPage: (String, Boolean) -> Unit = { key, _ ->
+        if (s.pageKey != null) a.onCloseSettings()
+        selected = key
     }
     val onRailFocus: (String) -> Unit = { key ->
         if (key != railSelection) showRailPage(key, false)

@@ -129,23 +129,134 @@ internal fun SetupPanel(
     onOpenDeveloperOptions: () -> Unit,
     onRequestWirelessAdb: (Boolean) -> Unit,
 ) {
+    SettingsHub(s, a)
+}
+
+/** Settings owned by Setup's existing state/actions, split into hub categories. */
+@Composable
+internal fun SetupContent(
+    s: FrontEndState,
+    a: FrontEndActions,
+    category: SettingsCategory,
+    host: MenuHost,
+    onOpenDeveloperOptions: () -> Unit,
+    onRequestWirelessAdb: (Boolean) -> Unit,
+) {
+    when (category) {
+        SettingsCategory.GENERAL -> GeneralSettings(s, a, host)
+        SettingsCategory.DISPLAY -> DisplaySettings(s, a, host)
+        SettingsCategory.CONTROLS -> ControlsSettings(s, a, host)
+        SettingsCategory.AUDIO -> Unit
+        SettingsCategory.LIBRARY -> LibrarySettings(s, a)
+        SettingsCategory.SESSIONS -> SessionSettings(s, a, host)
+        SettingsCategory.COMPATIBILITY -> CompatibilitySettings(s, a)
+        SettingsCategory.SUPPORT -> SupportSettings(s, a, onOpenDeveloperOptions, onRequestWirelessAdb)
+    }
+}
+
+@Composable
+private fun GeneralSettings(s: FrontEndState, a: FrontEndActions, host: MenuHost) {
+    SettingsGroup(stringResource(R.string.setup_launcher)) {
+        SettingsAnchor("theme") { SettingsRow(stringResource(R.string.setup_theme), stringResource(R.string.setup_theme_hint)) {
+            Box {
+                ValueChip(Themes.byId(s.theme).label, host.open == "theme") { host.open = if (host.open == "theme") null else "theme" }
+                AnchoredMenu(host.open == "theme", onDismiss = { if (host.open == "theme") host.open = null }, title = stringResource(R.string.setup_theme)) { firstItemFocus ->
+                    Themes.all.forEachIndexed { index, theme ->
+                        MenuItem(theme.label, checked = s.theme == theme.id, focusRequester = if (index == 0) firstItemFocus else null) {
+                            a.onTheme(theme.id)
+                            host.open = null
+                        }
+                    }
+                }
+            }
+        } }
+        ToggleRow(host, "home-screen", stringResource(R.string.setup_home),
+            if (s.homeScreenEnabled) stringResource(R.string.setup_home_on) else stringResource(R.string.setup_home_off),
+            s.homeScreenEnabled) { a.onHomeScreen(it) }
+        ToggleRow(host, "launcher-fullscreen", stringResource(R.string.setup_fullscreen),
+            if (s.launcherFullscreen) stringResource(R.string.setup_fullscreen_on) else stringResource(R.string.setup_fullscreen_off),
+            s.launcherFullscreen) { a.onLauncherFullscreen(it) }
+        ToggleRow(host, "launcher-animations", stringResource(R.string.setup_animations), null,
+            s.animationsEnabled, onChange = a.onAnimationsEnabled)
+        if (s.homeScreenEnabled) SettingsAnchor("default-home") { ActionRow(stringResource(R.string.setup_default_home),
+            s.defaultHomeLabel ?: stringResource(R.string.setup_choose_home), stringResource(R.string.setup_choose), a.onHomeApp) }
+    }
+    SettingsGroup(stringResource(R.string.setup_linux_apps)) {
+        ToggleRow(host, "store-enabled", stringResource(R.string.setup_store),
+            if (s.storeEnabled) stringResource(R.string.setup_store_on) else stringResource(R.string.setup_store_off),
+            s.storeEnabled, onChange = a.onStoreEnabled)
+    }
+}
+
+@Composable
+private fun DisplaySettings(s: FrontEndState, a: FrontEndActions, host: MenuHost) {
+    SettingsGroup("Display and graphics") {
+        SettingsAnchor("fg") { SettingsRow(stringResource(R.string.frame_gen_title), stringResource(R.string.frame_gen_hint)) {
+            Box {
+                ValueChip(s.frameGenLabel, host.open == "fg") { host.open = if (host.open == "fg") null else "fg" }
+                FrameGenMenu(s, a, host)
+            }
+        } }
+    }
+}
+
+@Composable
+private fun ControlsSettings(s: FrontEndState, a: FrontEndActions, host: MenuHost) {
+    val controller = s.controller
+    if (controller != null && a.controller != null) SettingsAnchor("controller-actions") { SettingsGroup(stringResource(R.string.setup_controller)) {
+        ControllerRows(host, s.oscMode, controller, a.controller)
+    }
+    } else Note(stringResource(R.string.setup_controller_unavailable))
+    SettingsGroup(stringResource(R.string.setup_session)) {
+        ChoiceRow(host, "back-actions", stringResource(R.string.mode_back), SessionPrefs.backActionsOrder(s.backActionsInverted),
+            listOf(false to SessionPrefs.BACK_MENU_THEN_QAM, true to SessionPrefs.BACK_QAM_THEN_MENU),
+            s.backActionsInverted, onPick = a.onBackActionsInverted)
+    }
+}
+
+@Composable
+private fun LibrarySettings(s: FrontEndState, a: FrontEndActions) {
+    SettingsGroup("Library and files") {
+        val roms = s.romsDir ?: stringResource(R.string.setup_tool_roms_hint)
+        SettingsAnchor("files") { ActionRow(stringResource(R.string.setup_tool_files), stringResource(R.string.setup_tool_files_hint), "Open", a.onFiles) }
+        SettingsAnchor("roms") { ActionRow(stringResource(R.string.setup_tool_roms), roms, "Open", a.onRoms) }
+    }
+}
+
+@Composable
+private fun SessionSettings(s: FrontEndState, a: FrontEndActions, host: MenuHost) {
+    SettingsGroup(stringResource(R.string.setup_session)) {
+        ToggleRow(host, "offline", stringResource(R.string.setup_offline),
+            s.offlineAccount?.let { stringResource(R.string.setup_signed_in, it) } ?: stringResource(R.string.setup_sign_in_first),
+            s.offline, enabled = s.offlineAccount != null, onChange = { a.onOffline() })
+    }
+}
+
+@Composable
+private fun CompatibilitySettings(s: FrontEndState, a: FrontEndActions) {
+    SettingsGroup("Compatibility tools") {
+        SettingsAnchor("components") { ActionRow(stringResource(R.string.setup_card_components), stringResource(R.string.setup_card_components_hint), "Open") { a.onComponents(true) } }
+        SettingsAnchor("protons") { ActionRow(stringResource(R.string.setup_tool_protons), stringResource(R.string.setup_tool_protons_hint), "Open", a.onProtons) }
+        SettingsAnchor("performance") { ActionRow(stringResource(R.string.setup_tool_performance), stringResource(R.string.setup_tool_performance_hint), "Open", a.onPerformance) }
+    }
+}
+
+@Composable
+private fun SupportSettings(
+    s: FrontEndState,
+    a: FrontEndActions,
+    onOpenDeveloperOptions: () -> Unit,
+    onRequestWirelessAdb: (Boolean) -> Unit,
+) {
+    val context = LocalContext.current
     val host = rememberMenuHost()
-    val ctx = LocalContext.current
     var processLimitBusy by remember { mutableStateOf(false) }
     var processLimitMessage by remember { mutableStateOf<String?>(null) }
-    val setProcessLimit: (Boolean) -> Unit = { enabled ->
-        processLimitBusy = true
-        processLimitMessage = null
-        a.onSetPhantomProcessLimit(enabled) { error ->
-            processLimitBusy = false
-            if (error == null) {
-                a.onRefreshPhantomStatus()
-            } else {
-                processLimitMessage = ctx.getString(R.string.setup_limit_adb_failed)
-                onRequestWirelessAdb(enabled)
-            }
-        }
-    }
+    var showLimitDetails by rememberSaveable { mutableStateOf(false) }
+    val limitBlocks = PhantomProcessLimit.blocksSteam(s.phantomProcessStatus)
+    val gpu = remember { com.droiddeck.launcher.gpu.GpuInfo.detect() }
+    val gpuOk = gpu.support == com.droiddeck.launcher.gpu.GpuInfo.Support.TESTED
+    val gpuName = remember { DeviceSupport.gpuName() }
     val runtime = when {
         s.busy -> stringResource(R.string.common_working)
         s.removalPending -> stringResource(R.string.setup_retry_removal)
@@ -153,231 +264,106 @@ internal fun SetupPanel(
         s.available != null && s.available != s.installed -> stringResource(R.string.common_update)
         else -> stringResource(R.string.setup_manage)
     }
-    val colors = MaterialTheme.colorScheme
-    val pal = LocalPalette.current
-    // Tested hardware passes; an Adreno below it (a 610, say) warns rather than claiming support.
-    val gpu = remember { com.droiddeck.launcher.gpu.GpuInfo.detect() }
-    val gpuOk = gpu.support == com.droiddeck.launcher.gpu.GpuInfo.Support.TESTED
-    val gpuName = remember { DeviceSupport.gpuName() }
-    val limitBlocks = PhantomProcessLimit.blocksSteam(s.phantomProcessStatus)
-    val signedIn = s.offlineAccount != null
-    var showLimitDetails by rememberSaveable { mutableStateOf(false) }
-    val checks = 4
-    val readyCount = listOf(gpuOk, s.ready && !s.busy, !limitBlocks, signedIn).count { it }
-    // Four tabs instead of one long scroll; LB and RB turn them from anywhere on the page. Build
-    // and credits are on the Updates page.
-    val tabs = listOf(stringResource(R.string.setup_tab_overview), stringResource(R.string.setup_tab_controller), stringResource(R.string.setup_tab_session), stringResource(R.string.setup_tab_launcher))
-    var tab by rememberSaveable { mutableStateOf(0) }
-    val tabFocus = remember { List(tabs.size) { FocusRequester() } }
-    var tabTurned by remember { mutableStateOf(false) }
-    val pick: (Int) -> Unit = { i -> tab = i; tabTurned = true }
-    val inputModeManager = LocalInputModeManager.current
-    // The control a controller was on went with the old tab: it lands on the new tab itself.
-    LaunchedEffect(tab) {
-        if (tabTurned && inputModeManager.inputMode == InputMode.Keyboard) {
-            androidx.compose.runtime.withFrameNanos { }
-            runCatching { tabFocus[tab].requestFocus() }
+    val setProcessLimit: (Boolean) -> Unit = { enabled ->
+        processLimitBusy = true
+        processLimitMessage = null
+        a.onSetPhantomProcessLimit(enabled) { error ->
+            processLimitBusy = false
+            if (error == null) a.onRefreshPhantomStatus()
+            else {
+                processLimitMessage = context.getString(R.string.setup_limit_adb_failed)
+                onRequestWirelessAdb(enabled)
+            }
         }
     }
-    Rise(0, Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier.fillMaxSize().bumpers(
-                onPrevious = { pick((tab + tabs.size - 1) % tabs.size) },
-                onNext = { pick((tab + 1) % tabs.size) },
-            ),
-        ) {
-            PageHeader(stringResource(R.string.setup_title)) {
-                Chip(if (readyCount == checks) stringResource(R.string.setup_all_set) else stringResource(R.string.setup_n_ready, readyCount, checks), ok = readyCount == checks)
-            }
-            TabStrip(tabs, tab, pick, Modifier.padding(bottom = 4.dp), tabFocus)
-            Column(modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-                when (tab) {
-                    0 -> {
-                        SectionTitle(stringResource(R.string.setup_system_check), null)
-                        // What Steam needs, one row each: green when done, one button when not. The
-                        // process-limit controls only open under their row.
-                        Column(modifier = Modifier.fillMaxWidth().clip(Shape14).background(colors.surface).border(1.dp, pal.line, Shape14)) {
-                            CheckRow(
-                                if (gpuOk) CheckState.OK else CheckState.WARN,
-                                when (gpu.support) {
-                                    com.droiddeck.launcher.gpu.GpuInfo.Support.TESTED -> stringResource(R.string.setup_gpu_supported)
-                                    com.droiddeck.launcher.gpu.GpuInfo.Support.UNTESTED -> stringResource(R.string.setup_gpu_untested)
-                                    else -> stringResource(R.string.setup_gpu_unsupported)
-                                },
-                                when (gpu.support) {
-                                    com.droiddeck.launcher.gpu.GpuInfo.Support.TESTED -> stringResource(R.string.setup_gpu_detail, gpu.name, gpuName)
-                                    com.droiddeck.launcher.gpu.GpuInfo.Support.UNTESTED -> stringResource(R.string.setup_gpu_untested_detail, gpu.name, gpu.supportText.replaceFirstChar { it.lowercase() })
-                                    else -> stringResource(R.string.setup_gpu_unsupported_detail, gpuName)
-                                },
-                            )
-                            CheckRow(
-                                when { s.busy -> CheckState.BUSY; !s.ready -> CheckState.WARN; else -> CheckState.OK },
-                                stringResource(R.string.setup_runtime),
-                                when {
-                                    s.busy -> null
-                                    s.removalPending -> stringResource(R.string.runtime_removal_incomplete)
-                                    !s.ready -> stringResource(R.string.setup_runtime_missing)
-                                    s.available != null && s.available != s.installed -> stringResource(R.string.setup_runtime_update, s.installed ?: stringResource(R.string.setup_installed))
-                                    else -> stringResource(R.string.setup_runtime_current, s.installed ?: stringResource(R.string.setup_installed))
-                                },
-                                divider = !s.busy,
-                            ) { SecondaryButton(runtime, enabled = !s.busy && !s.runtimeActionsBlocked && !s.sessionRunning, compact = true, onClick = a.onRuntime) }
-                            if (s.busy) {
-                                Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
-                                    Text(
-                                        if (s.percent >= 0) stringResource(R.string.setup_runtime_progress, s.stage, s.percent) else s.stage,
-                                        fontSize = 13.sp, color = colors.onSurfaceVariant, modifier = Modifier.padding(bottom = 5.dp),
-                                    )
-                                    if (s.percent >= 0) LinearProgressIndicator(progress = { s.percent / 100f }, modifier = Modifier.fillMaxWidth().height(4.dp))
-                                    else LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp))
-                                }
-                                Box(Modifier.fillMaxWidth().height(1.dp).background(pal.line))
-                            }
-                            CheckRow(
-                                if (limitBlocks) CheckState.WARN else CheckState.OK,
-                                stringResource(R.string.setup_limit),
-                                when (s.phantomProcessStatus) {
-                                    PhantomProcessStatus.ENABLED -> stringResource(R.string.setup_limit_on)
-                                    PhantomProcessStatus.UNSET -> stringResource(R.string.setup_limit_unset)
-                                    PhantomProcessStatus.UNREADABLE -> stringResource(R.string.setup_limit_unknown)
-                                    else -> PhantomProcessLimit.title(s.phantomProcessStatus)
-                                },
-                            ) {
-                                if (limitBlocks) PrimaryButton(if (showLimitDetails) stringResource(R.string.common_hide) else stringResource(R.string.setup_fix_it), compact = true) { showLimitDetails = !showLimitDetails }
-                                else if (s.phantomProcessStatus != PhantomProcessStatus.NOT_APPLICABLE) {
-                                    SecondaryButton(if (showLimitDetails) stringResource(R.string.common_hide) else stringResource(R.string.setup_details), compact = true) { showLimitDetails = !showLimitDetails }
-                                }
-                            }
-                            AnimatedVisibility(showLimitDetails, enter = expandVertically(Motion.sp(1f)) + fadeIn(Motion.sp(1f)), exit = shrinkVertically(Motion.sp(1f)) + fadeOut(Motion.sp(1f))) {
-                                // One sentence and at most three buttons. The computer route and its
-                                // raw command live on the full page Wireless debugging opens.
-                                Column(modifier = Modifier.fillMaxWidth().padding(start = 56.dp, end = 14.dp, top = 4.dp, bottom = 10.dp)) {
-                                    Text(
-                                        if (limitBlocks) PhantomProcessLimit.gateInstructions(s.phantomProcessStatus)
-                                        else PhantomProcessLimit.instructions(s.phantomProcessStatus),
-                                        fontSize = 14.sp, color = colors.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp),
-                                    )
-                                    Actions {
-                                        if (limitBlocks) {
-                                            PrimaryButton(stringResource(R.string.setup_dev_options), compact = true, onClick = onOpenDeveloperOptions)
-                                            SecondaryButton(stringResource(R.string.setup_use_wireless), compact = true, enabled = !processLimitBusy) { setProcessLimit(false) }
-                                            SecondaryButton(stringResource(R.string.setup_check_again), compact = true, onClick = a.onRefreshPhantomStatus)
-                                        } else if (s.phantomProcessStatus == PhantomProcessStatus.DISABLED) {
-                                            SecondaryButton(stringResource(R.string.setup_limit_turn_on), compact = true, enabled = !processLimitBusy) { setProcessLimit(true) }
-                                        }
-                                    }
-                                    if (processLimitBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
-                                    processLimitMessage?.let { Text(it, fontSize = 14.sp, color = colors.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp)) }
-                                }
-                            }
-                            CheckRow(
-                                if (signedIn) CheckState.OK else CheckState.WARN,
-                                stringResource(R.string.setup_account),
-                                s.offlineAccount?.let { if (s.offline) stringResource(R.string.setup_signed_in_offline, it) else stringResource(R.string.setup_signed_in, it) } ?: stringResource(R.string.setup_sign_in),
-                                divider = false,
-                            )
-                        }
-                        SectionTitle(stringResource(R.string.setup_tools), null)
-                        ToolGrid(s, a)
-                    }
-                    1 -> {
-                        val controller = s.controller
-                        if (controller != null && a.controller != null) SettingsGroup(stringResource(R.string.setup_controller)) {
-                            ControllerRows(host, s.oscMode, controller, a.controller)
-                        }
-                        if (s.controller == null || a.controller == null) Note(stringResource(R.string.setup_controller_unavailable))
-                    }
-                    2 -> {
-                        SettingsGroup(stringResource(R.string.setup_session)) {
-                            ChoiceRow(
-                                host, "back-actions", stringResource(R.string.mode_back), SessionPrefs.backActionsOrder(s.backActionsInverted),
-                                listOf(
-                                    false to SessionPrefs.BACK_MENU_THEN_QAM,
-                                    true to SessionPrefs.BACK_QAM_THEN_MENU,
-                                ), s.backActionsInverted, onPick = a.onBackActionsInverted,
-                            )
-                            SettingsRow(stringResource(R.string.frame_gen_title), stringResource(R.string.frame_gen_hint)) {
-                                Box {
-                                    ValueChip(s.frameGenLabel, host.open == "fg") { host.open = if (host.open == "fg") null else "fg" }
-                                    FrameGenMenu(s, a, host)
-                                }
-                            }
-                            ToggleRow(host, "logs", stringResource(R.string.setup_logs), stringResource(R.string.setup_logs_hint), s.logsEnabled) { a.onLogs() }
-                            ActionRow(stringResource(R.string.setup_latest_logs), stringResource(R.string.drawer_logs_hint), stringResource(R.string.drawer_share_logs), a.onShareLogs)
-                            ActionRow(stringResource(R.string.setup_saved_logs), stringResource(R.string.setup_saved_logs_hint, com.droiddeck.launcher.session.SessionPaths.KEEP_SESSIONS), stringResource(R.string.setup_clear_logs), a.onClearLogs)
-                            ToggleRow(
-                                host, "offline", stringResource(R.string.setup_offline),
-                                s.offlineAccount?.let { stringResource(R.string.setup_signed_in, it) } ?: stringResource(R.string.setup_sign_in_first),
-                                s.offline, enabled = s.offlineAccount != null,
-                            ) { a.onOffline() }
-                        }
-                    }
-                    3 -> {
-                        SettingsGroup(stringResource(R.string.setup_launcher)) {
-                            SettingsRow(stringResource(R.string.setup_theme), stringResource(R.string.setup_theme_hint)) {
-                                Box {
-                                    ValueChip(Themes.byId(s.theme).label, host.open == "theme") { host.open = if (host.open == "theme") null else "theme" }
-                                    AnchoredMenu(host.open == "theme", onDismiss = { if (host.open == "theme") host.open = null }, title = stringResource(R.string.setup_theme)) { firstItemFocus ->
-                                        Themes.all.forEachIndexed { index, theme ->
-                                            MenuItem(theme.label, checked = s.theme == theme.id, focusRequester = if (index == 0) firstItemFocus else null) {
-                                                a.onTheme(theme.id)
-                                                host.open = null
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            ToggleRow(
-                                host, "home-screen", stringResource(R.string.setup_home),
-                                if (s.homeScreenEnabled) stringResource(R.string.setup_home_on) else stringResource(R.string.setup_home_off),
-                                s.homeScreenEnabled,
-                            ) { a.onHomeScreen(it) }
-                            ToggleRow(
-                                host, "launcher-fullscreen", stringResource(R.string.setup_fullscreen),
-                                if (s.launcherFullscreen) stringResource(R.string.setup_fullscreen_on) else stringResource(R.string.setup_fullscreen_off),
-                                s.launcherFullscreen,
-                            ) { a.onLauncherFullscreen(it) }
-                            ToggleRow(host, "launcher-animations", stringResource(R.string.setup_animations), null,
-                                s.animationsEnabled, onChange = a.onAnimationsEnabled)
-                            if (s.homeScreenEnabled) {
-                                ActionRow(stringResource(R.string.setup_default_home), s.defaultHomeLabel ?: stringResource(R.string.setup_choose_home), stringResource(R.string.setup_choose), a.onHomeApp)
-                            }
-                        }
-                        SettingsGroup(stringResource(R.string.setup_linux_apps)) {
-                            ToggleRow(
-                                host, "store-enabled", stringResource(R.string.setup_store),
-                                if (s.storeEnabled) stringResource(R.string.setup_store_on)
-                                else stringResource(R.string.setup_store_off),
-                                s.storeEnabled,
-                            ) { a.onStoreEnabled(it) }
-                        }
-                    }
+    SettingsGroup(stringResource(R.string.setup_system_check)) {
+        Column(modifier = Modifier.fillMaxWidth().clip(Shape14).background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, LocalPalette.current.line, Shape14)) {
+            CheckRow(
+                if (gpuOk) CheckState.OK else CheckState.WARN,
+                when (gpu.support) {
+                    com.droiddeck.launcher.gpu.GpuInfo.Support.TESTED -> stringResource(R.string.setup_gpu_supported)
+                    com.droiddeck.launcher.gpu.GpuInfo.Support.UNTESTED -> stringResource(R.string.setup_gpu_untested)
+                    else -> stringResource(R.string.setup_gpu_unsupported)
+                },
+                when (gpu.support) {
+                    com.droiddeck.launcher.gpu.GpuInfo.Support.TESTED -> stringResource(R.string.setup_gpu_detail, gpu.name, gpuName)
+                    com.droiddeck.launcher.gpu.GpuInfo.Support.UNTESTED -> stringResource(R.string.setup_gpu_untested_detail, gpu.name, gpu.supportText.replaceFirstChar { it.lowercase() })
+                    else -> stringResource(R.string.setup_gpu_unsupported_detail, gpuName)
+                },
+            )
+            SettingsAnchor("runtime") { CheckRow(
+                when { s.busy -> CheckState.BUSY; !s.ready -> CheckState.WARN; else -> CheckState.OK },
+                stringResource(R.string.setup_runtime),
+                when {
+                    s.busy -> null
+                    s.removalPending -> stringResource(R.string.runtime_removal_incomplete)
+                    !s.ready -> stringResource(R.string.setup_runtime_missing)
+                    s.available != null && s.available != s.installed -> stringResource(R.string.setup_runtime_update, s.installed ?: stringResource(R.string.setup_installed))
+                    else -> stringResource(R.string.setup_runtime_current, s.installed ?: stringResource(R.string.setup_installed))
+                },
+                divider = !s.busy,
+            ) { SecondaryButton(runtime, enabled = !s.busy && !s.runtimeActionsBlocked && !s.sessionRunning, compact = true, onClick = a.onRuntime) } }
+            if (s.busy) {
+                Column(modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 10.dp)) {
+                    Text(if (s.percent >= 0) stringResource(R.string.setup_runtime_progress, s.stage, s.percent) else s.stage,
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 5.dp))
+                    if (s.percent >= 0) LinearProgressIndicator(progress = { s.percent / 100f }, modifier = Modifier.fillMaxWidth().height(4.dp))
+                    else LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp))
                 }
             }
+            SettingsAnchor("phantom-process") { CheckRow(
+                if (limitBlocks) CheckState.WARN else CheckState.OK,
+                stringResource(R.string.setup_limit),
+                when (s.phantomProcessStatus) {
+                    PhantomProcessStatus.ENABLED -> stringResource(R.string.setup_limit_on)
+                    PhantomProcessStatus.UNSET -> stringResource(R.string.setup_limit_unset)
+                    PhantomProcessStatus.UNREADABLE -> stringResource(R.string.setup_limit_unknown)
+                    else -> PhantomProcessLimit.title(s.phantomProcessStatus)
+                },
+            ) {
+                if (limitBlocks) PrimaryButton(if (showLimitDetails) stringResource(R.string.common_hide) else stringResource(R.string.setup_fix_it), compact = true) { showLimitDetails = !showLimitDetails }
+                else if (s.phantomProcessStatus != PhantomProcessStatus.NOT_APPLICABLE) SecondaryButton(
+                    if (showLimitDetails) stringResource(R.string.common_hide) else stringResource(R.string.setup_details), compact = true,
+                ) { showLimitDetails = !showLimitDetails }
+            } }
+            AnimatedVisibility(showLimitDetails, enter = expandVertically(Motion.sp(1f)) + fadeIn(Motion.sp(1f)), exit = shrinkVertically(Motion.sp(1f)) + fadeOut(Motion.sp(1f))) {
+                Column(modifier = Modifier.fillMaxWidth().padding(start = 56.dp, end = 14.dp, top = 4.dp, bottom = 10.dp)) {
+                    Text(if (limitBlocks) PhantomProcessLimit.gateInstructions(s.phantomProcessStatus) else PhantomProcessLimit.instructions(s.phantomProcessStatus),
+                        fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp))
+                    Actions {
+                        if (limitBlocks) {
+                            PrimaryButton(stringResource(R.string.setup_dev_options), compact = true, onClick = onOpenDeveloperOptions)
+                            SecondaryButton(stringResource(R.string.setup_use_wireless), compact = true, enabled = !processLimitBusy) { setProcessLimit(false) }
+                            SecondaryButton(stringResource(R.string.setup_check_again), compact = true, onClick = a.onRefreshPhantomStatus)
+                        } else if (s.phantomProcessStatus == PhantomProcessStatus.DISABLED) {
+                            SecondaryButton(stringResource(R.string.setup_limit_turn_on), compact = true, enabled = !processLimitBusy) { setProcessLimit(true) }
+                        }
+                    }
+                    if (processLimitBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
+                    processLimitMessage?.let { Text(it, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 4.dp)) }
+                }
+            }
+            CheckRow(
+                if (s.offlineAccount != null) CheckState.OK else CheckState.WARN,
+                stringResource(R.string.setup_account),
+                s.offlineAccount?.let { if (s.offline) stringResource(R.string.setup_signed_in_offline, it) else stringResource(R.string.setup_signed_in, it) }
+                    ?: stringResource(R.string.setup_sign_in),
+                divider = false,
+            )
         }
+    }
+    SettingsAnchor("session-logs") { SettingsGroup(stringResource(R.string.setup_session)) {
+        ToggleRow(host, "logs", stringResource(R.string.setup_logs), stringResource(R.string.setup_logs_hint), s.logsEnabled) { a.onLogs() }
+        SettingsAnchor("latest-logs") { ActionRow(stringResource(R.string.setup_latest_logs), stringResource(R.string.drawer_logs_hint), stringResource(R.string.drawer_share_logs), a.onShareLogs) }
+        SettingsAnchor("saved-logs") { ActionRow(stringResource(R.string.setup_saved_logs), stringResource(R.string.setup_saved_logs_hint, com.droiddeck.launcher.session.SessionPaths.KEEP_SESSIONS), stringResource(R.string.setup_clear_logs), a.onClearLogs) }
+    } }
+    SettingsGroup("More support") {
+        SettingsAnchor("updates") { ActionRow("DroidDeck updates", "Build information and release channel", "Open", a.onOpenUpdates) }
     }
 }
 
 /** The launcher's own tools as cards: four across, two by two on a narrow page. */
-@Composable
-private fun ToolGrid(s: FrontEndState, a: FrontEndActions) {
-    val columns = if (LocalNarrowPane.current) 2 else 4
-    val tools = listOf(
-        ToolSpec(Icons.Outlined.Folder, stringResource(R.string.setup_tool_files), stringResource(R.string.setup_tool_files_hint), a.onFiles),
-        ToolSpec(Icons.Outlined.Extension, stringResource(R.string.setup_tool_protons), stringResource(R.string.setup_tool_protons_hint), a.onProtons),
-        ToolSpec(Icons.Outlined.Speed, stringResource(R.string.setup_tool_performance), stringResource(R.string.setup_tool_performance_hint), a.onPerformance),
-        ToolSpec(Icons.Outlined.VideogameAsset, stringResource(R.string.setup_tool_roms), s.romsDir ?: stringResource(R.string.setup_tool_roms_hint), a.onRoms),
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-        for (row in tools.chunked(columns)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-                for (t in row) ToolCard(t, Modifier.weight(1f).fillMaxHeight())
-                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
-    }
-}
-
 private class ToolSpec(val icon: ImageVector, val title: String, val detail: String, val onClick: () -> Unit)
 
 @Composable

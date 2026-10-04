@@ -108,6 +108,8 @@ fun ComponentsPage(
     /** The GPU drivers tab ([GPU_TAB]): what it shows and does. */
     gpu: GpuDriversState = GpuDriversState(),
     gpuActions: GpuDriversActions = GpuDriversActions(),
+    defaultProtonId: String? = null,
+    onDefaultProton: (String) -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     val pal = LocalPalette.current
@@ -117,6 +119,7 @@ fun ComponentsPage(
     var confirmTitle by remember { mutableStateOf("") }
     var about by remember { mutableStateOf(false) }
     var protonMenu by remember { mutableStateOf(false) }
+    var defaultProtonMenu by remember { mutableStateOf(false) }
     var confirmVerb by remember { mutableStateOf(R.string.comp_swap) }
     val ctx = LocalContext.current
     fun ask(title: String, body: String, verb: Int, action: () -> Unit) { confirmTitle = title; confirmVerb = verb; confirm = body to action }
@@ -172,32 +175,52 @@ fun ComponentsPage(
         }
         if (narrow) Text(nightlies, fontSize = 13.sp, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
 
-        // ---- which Proton, which component ------------------------------------------------------
+        // ---- Steam default Proton and the component editing target -----------------------------
         val comps = ComponentsManager.COMPONENTS
         androidx.compose.foundation.layout.FlowRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
         ) {
-            if (view != null && !gpuTab) Box {
-                ValueChip(view.proton.name, protonMenu, modifier = Modifier.widthIn(max = 300.dp).heightIn(min = 44.dp)) { protonMenu = !protonMenu }
-                AnchoredMenu(protonMenu, onDismiss = { protonMenu = false }, title = stringResource(R.string.comp_proton),
-                    note = stringResource(R.string.comp_proton_note)) { first ->
-                    views.forEachIndexed { i, v ->
-                        val swaps = v.components.values.count { it.activeFile != null }
-                        MenuItem(
-                            v.proton.name, checked = v.proton.id == view.proton.id,
-                            detail = (if (swaps > 0) stringResource(R.string.comp_swapped, v.proton.version, swaps) else stringResource(R.string.comp_all_original, v.proton.version))
-                                .let {
-                                    when (v.sync?.state) {
-                                        "pack" -> stringResource(R.string.comp_esync_pack, it)
-                                        "wanted" -> stringResource(R.string.comp_esync_wanted, it)
-                                        "builtin" -> stringResource(R.string.comp_esync_builtin, it)
-                                        else -> it
-                                    }
-                                }
-                                .let { if (v.inUseByGame) stringResource(R.string.comp_game_running_suffix, it) else it },
-                            focusRequester = if (i == 0) first else null,
-                        ) { onProton(v.proton.id); protonMenu = false }
+            if (view != null && !gpuTab) {
+                Column {
+                    Text("Default Proton", fontSize = 12.sp, color = colors.onSurfaceVariant)
+                    Box {
+                        val defaultName = views.firstOrNull { it.proton.id == defaultProtonId }?.proton?.name ?: "Choose default"
+                        ValueChip(defaultName, defaultProtonMenu, modifier = Modifier.widthIn(max = 300.dp).heightIn(min = 44.dp)) { defaultProtonMenu = !defaultProtonMenu }
+                        AnchoredMenu(defaultProtonMenu, onDismiss = { defaultProtonMenu = false }, title = "Default Proton",
+                            note = stringResource(R.string.comp_proton_note)) { first ->
+                            views.forEachIndexed { i, v ->
+                                MenuItem(v.proton.name, checked = v.proton.id == defaultProtonId,
+                                    focusRequester = if (i == 0) first else null,
+                                ) { onDefaultProton(v.proton.id); defaultProtonMenu = false }
+                            }
+                        }
+                    }
+                }
+                Column {
+                    Text("Editing components for", fontSize = 12.sp, color = colors.onSurfaceVariant)
+                    Box {
+                        ValueChip(view.proton.name, protonMenu, modifier = Modifier.widthIn(max = 300.dp).heightIn(min = 44.dp)) { protonMenu = !protonMenu }
+                        AnchoredMenu(protonMenu, onDismiss = { protonMenu = false }, title = "Editing components for",
+                            note = "Component changes apply to this Proton. The default Proton is selected separately above.") { first ->
+                            views.forEachIndexed { i, v ->
+                                val swaps = v.components.values.count { it.activeFile != null }
+                                MenuItem(
+                                    v.proton.name, checked = v.proton.id == view.proton.id,
+                                    detail = (if (swaps > 0) stringResource(R.string.comp_swapped, v.proton.version, swaps) else stringResource(R.string.comp_all_original, v.proton.version))
+                                        .let {
+                                            when (v.sync?.state) {
+                                                "pack" -> stringResource(R.string.comp_esync_pack, it)
+                                                "wanted" -> stringResource(R.string.comp_esync_wanted, it)
+                                                "builtin" -> stringResource(R.string.comp_esync_builtin, it)
+                                                else -> it
+                                            }
+                                        }
+                                        .let { if (v.inUseByGame) stringResource(R.string.comp_game_running_suffix, it) else it },
+                                    focusRequester = if (i == 0) first else null,
+                                ) { onProton(v.proton.id); protonMenu = false }
+                            }
+                        }
                     }
                 }
             }

@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -80,17 +80,17 @@ fun PerformancePage(
                 stringResource(R.string.perf_override_hint),
                 clientOverride, onChange = onClientOverride,
             )
-            MultiRow(
+            SettingsAnchor("clientCores") { MultiRow(
                 host, "clientCores", stringResource(R.string.perf_client_cores), if (clientOverride) stringResource(R.string.perf_client_cores_on) else stringResource(R.string.perf_client_cores_off),
                 coreItems, clientCores, enabled = clientOverride, onToggle = onClientCore,
-            )
+            ) }
         }
         SettingsGroup(stringResource(R.string.perf_game_cores_group)) {
-            MultiRow(
+            SettingsAnchor("gameCores") { MultiRow(
                 host, "gameCores", stringResource(R.string.perf_game_cores),
                 stringResource(R.string.perf_game_cores_hint),
                 coreItems, gameCores, onToggle = onGameCore,
-            )
+            ) }
         }
         SettingsGroup(stringResource(R.string.perf_client_ui)) {
             ToggleRow(
@@ -162,7 +162,7 @@ fun PerformancePage(
         SettingsGroup(stringResource(R.string.perf_identity)) {
             var draft by remember(guestHostname) { mutableStateOf(guestHostname) }
             val valid = SessionPrefs.validGuestHostname(draft) != null
-            SettingsRow(
+            SettingsAnchor("hostname") { SettingsRow(
                 stringResource(R.string.perf_hostname),
                 if (valid || draft.isBlank()) stringResource(R.string.perf_hostname_hint, SessionPrefs.DEFAULT_GUEST_HOSTNAME)
                 else stringResource(R.string.perf_hostname_invalid),
@@ -174,9 +174,9 @@ fun PerformancePage(
                     },
                     singleLine = true, isError = !valid && draft.isNotBlank(),
                     placeholder = { Text(SessionPrefs.DEFAULT_GUEST_HOSTNAME) },
-                    modifier = Modifier.width(220.dp),
+                    modifier = Modifier.widthIn(max = 220.dp),
                 )
-            }
+            } }
         }
         if (phantomWarning != null) {
             Spacer(Modifier.height(16.dp))

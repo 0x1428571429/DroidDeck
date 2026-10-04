@@ -116,11 +116,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import com.droiddeck.launcher.R
-import com.droiddeck.launcher.core.FexPreset
 import com.droiddeck.launcher.core.TextureFiltering
+import com.droiddeck.launcher.core.FexPreset
 import com.droiddeck.launcher.gpu.FrameGen
 import com.droiddeck.launcher.gpu.Lossless
-import com.droiddeck.launcher.gpu.ScreenEffectLooks
 import com.droiddeck.launcher.gpu.ScreenEffects
 import com.droiddeck.launcher.session.SessionPrefs
 import com.droiddeck.launcher.session.ComponentsManager
@@ -386,8 +385,9 @@ fun SessionDrawer(open: Boolean, page: Int, controllerActive: Boolean, onPageCha
                             }
                         }
                         DRAWER_PAGE_EFFECTS -> {
-                            ScreenEffectsGroup(host, a) { key -> focus.track(page, key) }
-                            TextureFilteringGroup(host, a) { key -> focus.track(page, key) }
+                            ScreenEffectsSettings(host, a.effects, a.upscaler, a.onEffects, a.onUpscaler) { key -> focus.track(page, key) }
+                            TextureFilteringSettings(host, a.textureAnisotropy, a.textureLodBias,
+                                a.onTextureAnisotropy, a.onTextureLodBias) { key -> focus.track(page, key) }
                         }
                         DRAWER_PAGE_COMPONENTS -> ComponentsDrawerPage(host, a) { key -> focus.track(page, key) }
                         DRAWER_PAGE_CONTROLS -> {
@@ -695,61 +695,6 @@ private fun DrawerPageTabs(page: Int, modifier: Modifier = Modifier, compact: Bo
 
 /** The Look row's value when the rows below match no Look. */
 private const val LOOK_CUSTOM = "custom"
-
-/**
- * Screen effects on the Effects page: a Look row that moves every row under it, then the rows
- * themselves: switches and sliders the d-pad steps (SliderRow), so a pad drives them.
- */
-@Composable
-private fun ScreenEffectsGroup(host: MenuHost, a: DrawerActions, track: (String) -> Modifier) {
-    val e = a.effects
-    val look = ScreenEffectLooks.match(e, a.upscaler)
-    SettingsGroup(stringResource(R.string.drawer_effects)) {
-        val looks = ScreenEffectLooks.LOOKS.map { it.name to it.name }
-        ChoiceRow(host, "look", stringResource(R.string.drawer_look),
-            look?.desc ?: stringResource(R.string.drawer_effects_hint),
-            if (look == null) listOf(LOOK_CUSTOM to stringResource(R.string.drawer_look_custom)) + looks else looks,
-            look?.name ?: LOOK_CUSTOM, chipModifier = track("look"), hintLines = 2) { name ->
-            ScreenEffectLooks.LOOKS.firstOrNull { it.name == name }?.let { picked ->
-                picked.scalingMode?.let(a.onUpscaler)
-                a.onEffects(picked.effects)
-            }
-        }
-        ToggleRow(host, "cas", stringResource(R.string.drawer_cas), null, e.cas, chipModifier = track("cas")) { a.onEffects(e.copy(cas = it)) }
-        SliderRow(stringResource(R.string.drawer_cas_level), null, e.casLevel, 0..100, step = 5, enabled = e.cas,
-            format = { "$it%" }, modifier = track("cas-level")) { a.onEffects(e.copy(casLevel = it)) }
-        ToggleRow(host, "fake-hdr", stringResource(R.string.drawer_fake_hdr), null, e.hdr, chipModifier = track("fake-hdr")) { a.onEffects(e.copy(hdr = it)) }
-        ToggleRow(host, "deband", stringResource(R.string.drawer_deband), null, e.deband, chipModifier = track("deband")) { a.onEffects(e.copy(deband = it)) }
-        SliderRow(stringResource(R.string.drawer_deband_strength), null, e.debandStrength, 0..200, step = 5, enabled = e.deband,
-            format = { "$it%" }, modifier = track("deband-strength")) { a.onEffects(e.copy(debandStrength = it)) }
-        SliderRow(stringResource(R.string.drawer_brightness), null, e.brightness, -100..100, step = 2,
-            format = ::signed, modifier = track("brightness")) { a.onEffects(e.copy(brightness = it)) }
-        SliderRow(stringResource(R.string.drawer_contrast), null, e.contrast, -100..100, step = 2,
-            format = ::signed, modifier = track("contrast")) { a.onEffects(e.copy(contrast = it)) }
-        SliderRow(stringResource(R.string.drawer_gamma), null, (e.gamma * 100f).roundToInt(), 50..300, step = 5,
-            format = { String.format(Locale.US, "%.2f", it / 100f) }, modifier = track("gamma")) { a.onEffects(e.copy(gamma = it / 100f)) }
-        SliderRow(stringResource(R.string.drawer_saturation), null, e.saturation, 0..200, step = 5,
-            format = { "$it%" }, modifier = track("saturation")) { a.onEffects(e.copy(saturation = it)) }
-        ToggleRow(host, "fxaa", stringResource(R.string.drawer_fxaa), null, e.fxaa, chipModifier = track("fxaa")) { a.onEffects(e.copy(fxaa = it)) }
-        ToggleRow(host, "toon", stringResource(R.string.drawer_toon), null, e.toon, chipModifier = track("toon")) { a.onEffects(e.copy(toon = it)) }
-        ToggleRow(host, "crt", stringResource(R.string.drawer_crt), null, e.crt, chipModifier = track("crt")) { a.onEffects(e.copy(crt = it)) }
-        ToggleRow(host, "ntsc", stringResource(R.string.drawer_ntsc), null, e.ntsc, chipModifier = track("ntsc")) { a.onEffects(e.copy(ntsc = it)) }
-    }
-}
-
-/** Texture filtering on the Effects page: DXVK options for the next DirectX 9-11 launch. */
-@Composable
-private fun TextureFilteringGroup(host: MenuHost, a: DrawerActions, track: (String) -> Modifier) {
-    SettingsGroup(stringResource(R.string.drawer_texture)) {
-        ChoiceRow(host, "anisotropy", stringResource(R.string.drawer_anisotropy), stringResource(R.string.drawer_texture_hint),
-            SessionPrefs.textureAnisotropyChoices, a.textureAnisotropy, chipModifier = track("anisotropy"), onPick = a.onTextureAnisotropy)
-        ChoiceRow(host, "texture-sharpness", stringResource(R.string.drawer_texture_sharpness), stringResource(R.string.drawer_texture_hint),
-            SessionPrefs.textureLodBiasChoices, a.textureLodBias, note = stringResource(R.string.drawer_texture_sharpness_note),
-            chipModifier = track("texture-sharpness"), onPick = a.onTextureLodBias)
-    }
-}
-
-private fun signed(v: Int) = if (v > 0) "+$v" else "$v"
 
 /** Display, Effects, Controls, Components, Settings. */
 const val DRAWER_PAGES = 5
