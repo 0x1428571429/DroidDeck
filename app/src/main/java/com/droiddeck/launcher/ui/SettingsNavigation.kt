@@ -1,5 +1,12 @@
 package com.droiddeck.launcher.ui
 
+import com.droiddeck.launcher.session.SessionService
+
+internal val settingsSessionModes = listOf(
+    SessionService.MODE_STEAM to "Steam",
+    SessionService.MODE_DESKTOP to "Desktop",
+)
+
 /** A specialist search returns to the category control that opens that specialist. */
 internal fun settingsCategoryTarget(target: String?): String? = when {
     target == "default-proton" || target == "editing-proton" -> "components"

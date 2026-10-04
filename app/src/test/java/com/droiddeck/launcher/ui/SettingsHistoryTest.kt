@@ -5,8 +5,13 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class SettingsHistoryTest {
+    @Test fun sessionTabsUseTheRuntimeModeIdentifiers() {
+        assertEquals(listOf("steam", "lxqt"), settingsSessionModes.map { it.first })
+        assertEquals(settingsSessionModes.last().first, SettingsCatalog.search("Desktop renderer").single().mode)
+    }
+
     @Test fun specialistBackRestoresCategoryAndMode() {
-        val category = SettingsDestination.Category(SettingsCategory.SESSIONS, "desktop", "renderer")
+        val category = SettingsDestination.Category(SettingsCategory.SESSIONS, com.droiddeck.launcher.session.SessionService.MODE_DESKTOP, "renderer")
         val history = SettingsHistory().open(category).open(SettingsDestination.Components("gpu"))
         assertEquals(category, history.back().current)
         assertNull(history.back().back().current)
@@ -14,8 +19,8 @@ class SettingsHistoryTest {
 
     @Test fun changingModeReplacesCurrentPage() {
         val category = SettingsDestination.Category(SettingsCategory.DISPLAY)
-        val history = SettingsHistory().open(category).replace(category.copy(mode = "desktop"))
-        assertEquals("desktop", (history.current as SettingsDestination.Category).mode)
+        val history = SettingsHistory().open(category).replace(category.copy(mode = com.droiddeck.launcher.session.SessionService.MODE_DESKTOP))
+        assertEquals(com.droiddeck.launcher.session.SessionService.MODE_DESKTOP, (history.current as SettingsDestination.Category).mode)
         assertNull(history.back().current)
     }
 

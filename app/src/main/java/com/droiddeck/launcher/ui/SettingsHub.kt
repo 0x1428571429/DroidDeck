@@ -68,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.droiddeck.launcher.session.SessionService
 import com.droiddeck.launcher.core.PhantomProcessLimit
 import kotlinx.coroutines.flow.filterNotNull
 
@@ -170,7 +171,7 @@ object SettingsCatalog {
         SettingsEntry("mangoapp", SettingsCategory.DISPLAY, "Performance overlay", "Show the MangoHud performance overlay", listOf("mangohud", "mangoapp"), "steam"),
         SettingsEntry("channel", SettingsCategory.SESSIONS, "Steam branch", "Choose the Steam client update branch", listOf("beta", "client channel"), "steam"),
         SettingsEntry("wifi", SettingsCategory.SESSIONS, "Wi-Fi discovery", "Enable local network discovery for Steam", listOf("network", "remote play"), "steam"),
-        SettingsEntry("renderer", SettingsCategory.SESSIONS, "Desktop renderer", "Choose the Linux desktop renderer", listOf("desktop graphics"), "desktop"),
+        SettingsEntry("renderer", SettingsCategory.SESSIONS, "Desktop renderer", "Choose the Linux desktop renderer", listOf("desktop graphics"), SessionService.MODE_DESKTOP),
         SettingsEntry("decky", SettingsCategory.SESSIONS, "Decky Loader", "Install and manage Decky Loader", listOf("decky loader", "plugin loader"), "steam"),
         SettingsEntry("decky-enabled", SettingsCategory.SESSIONS, "Enable Decky Loader", "Start or stop Decky Loader with Steam", listOf("decky toggle"), "steam"),
         SettingsEntry("decky-loader", SettingsCategory.SESSIONS, "Decky installation", "Install or repair the Decky loader", listOf("decky install", "decky status"), "steam"),

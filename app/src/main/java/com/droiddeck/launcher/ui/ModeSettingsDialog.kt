@@ -220,7 +220,7 @@ fun ModeSettingsContent(
                 onPick = a.onFpsLimit,
             )
             ChoiceRow(
-                host, "upscaler", stringResource(R.string.drawer_scaling), "Shared · Applies next session. How the picture is resized to the screen; the sharpening modes sharpen where it is enlarged.",
+                host, "upscaler", stringResource(R.string.drawer_scaling), "Shared · Applies next session.",
                 com.droiddeck.launcher.session.SessionPrefs.upscalerChoices, s.upscaler,
                 note = "The sharpening modes work only when the session is smaller than the screen; Linear, Nearest and Sharpen only work at any size. Costs a little GPU time.",
                 onPick = a.onUpscaler,
@@ -276,11 +276,11 @@ fun ModeSettingsContent(
         if (steam && s.directAudio != null && s.mic != null) SettingsGroup(stringResource(R.string.mode_audio)) {
             ToggleRow(host, "da", stringResource(R.string.mode_directaudio), stringResource(R.string.mode_directaudio_hint), s.directAudio, onChange = a.onDirectAudio)
             ChoiceRow(
-                host, "clientAudio", "Steam-menu audio", "Steam menus only. " + stringResource(R.string.mode_client_audio_hint),
+                host, "clientAudio", "Steam-menu audio", stringResource(R.string.mode_client_audio_hint),
                 listOf("classic" to stringResource(R.string.mode_client_audio_classic), "directaudio" to stringResource(R.string.mode_client_audio_direct)), if (s.clientDirectAudio) "directaudio" else "classic",
                 onPick = { id -> a.onClientDirectAudio(id == "directaudio") },
             )
-            ToggleRow(host, "mic", stringResource(R.string.mode_mic), stringResource(R.string.mode_mic_hint), s.mic, onChange = a.onMic)
+            ToggleRow(host, "mic", stringResource(R.string.mode_mic), null, s.mic, onChange = a.onMic)
         }
       }
       SettingsCategory.LIBRARY -> {

@@ -37,7 +37,7 @@ class SettingsCatalogTest {
 
         val renderer = SettingsCatalog.entries.single { it.target == "renderer" }
         assertEquals(SettingsCategory.SESSIONS, renderer.category)
-        assertEquals("desktop", renderer.mode)
+        assertEquals(com.droiddeck.launcher.session.SessionService.MODE_DESKTOP, renderer.mode)
 
         val overlay = SettingsCatalog.entries.single { it.target == "mangoapp" }
         assertEquals(SettingsCategory.DISPLAY, overlay.category)

@@ -184,7 +184,7 @@ private fun GeneralSettings(s: FrontEndState, a: FrontEndActions, host: MenuHost
 @Composable
 private fun DisplaySettings(s: FrontEndState, a: FrontEndActions, host: MenuHost) {
     SettingsGroup("Display and graphics") {
-        SettingsAnchor("fg") { SettingsRow(stringResource(R.string.frame_gen_title), stringResource(R.string.frame_gen_hint)) {
+        SettingsAnchor("fg") { SettingsRow(stringResource(R.string.frame_gen_title), null) {
             Box {
                 ValueChip(s.frameGenLabel, host.open == "fg") { host.open = if (host.open == "fg") null else "fg" }
                 FrameGenMenu(s, a, host)

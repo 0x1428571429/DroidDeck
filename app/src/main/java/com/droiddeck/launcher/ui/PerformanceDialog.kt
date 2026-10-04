@@ -71,7 +71,6 @@ fun PerformancePage(
     val coreItems = cores.map { it.core to it.label }
     SettingsPage(
         host, title = stringResource(R.string.perf_title),
-        lede = stringResource(R.string.perf_lede),
         onBack = onDismiss,
     ) {
         SettingsGroup(stringResource(R.string.perf_client_cores_group)) {

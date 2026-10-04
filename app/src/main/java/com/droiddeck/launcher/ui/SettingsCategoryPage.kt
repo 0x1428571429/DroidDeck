@@ -57,7 +57,7 @@ internal fun SettingsCategoryPage(
         ) {
             if (category == SettingsCategory.DISPLAY || category == SettingsCategory.SESSIONS) {
                 SegmentedTabs(
-                    listOf("steam" to "Steam", "desktop" to "Desktop"), mode,
+                    settingsSessionModes, mode,
                     Modifier.padding(bottom = 10.dp), a.onSettingsMode,
                 )
             }
