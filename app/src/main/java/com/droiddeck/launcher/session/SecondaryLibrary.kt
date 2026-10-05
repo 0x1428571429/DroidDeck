@@ -37,7 +37,14 @@ object SecondaryLibrary {
                 (dir.startsWith("Proton ") || dir.startsWith("SteamLinuxRuntime") || id in bootstrapTools)) tools[id] = dir
         }
         val overrides = ArrayList<Pair<File, String>>()
-        for (name in listOf("compatdata", "shadercache")) {
+        // compatdata and shadercache are many small files on a library that may be on an SD card,
+        // where every write goes through Android's MediaProvider FUSE with the card mounted
+        // dirsync: a Steam update spends so long preallocating files there that the scheduler
+        // suspends it and the download never starts. The download staging area is the same story,
+        // so it lives on the app's private storage too and the finished depot is committed to the
+        // card at the end. (The per-runtime "downloading/<id>" overrides below become subpaths of
+        // this one; harmless, and both spellings still resolve.)
+        for (name in listOf("compatdata", "shadercache", "downloading")) {
             val target = File(private, "steamapps/$name")
             migrate(File(apps, name), target)
             overrides.add(target to "steamapps/$name")
