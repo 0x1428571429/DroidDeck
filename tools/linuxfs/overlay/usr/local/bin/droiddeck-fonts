@@ -1,0 +1,86 @@
+#!/bin/bash
+# DroidDeck's fontconfig setup for the Linux runtime. The rootfs ships DejaVu alone and no rules
+# for a default family: applications then find fonts but no default, and Firefox logs "no fonts"
+# and draws pages without text. DejaVu also has no CJK glyphs, so Chinese, Japanese and Korean
+# draw as tofu boxes. The device's own CJK fonts are bound under /usr/share/fonts/droiddeck-cjk by
+# the app (LinuxRuntime.bindCjkFonts); this script links fontconfig's default rules, writes
+# /etc/fonts/local.conf with DejaVu first and the CJK families after it, and rebuilds the cache
+# once per set of font files.
+# The first argument is the root to set up, "/" in a session; the tests point it at a temp tree.
+set -u
+root=${1:-/}
+root=${root%/}
+# "/" strips to empty above; put it back so the paths below read as absolute and the test for a
+# real session ("/") still holds.
+[ -n "$root" ] || root=/
+conf_dir=$root/etc/fonts
+fonts_dir=$root/usr/share/fonts
+cache_dir=$root/var/cache/fontconfig
+defaults_dir=$root/usr/share/fontconfig/conf.default
+cjk_dir=$fonts_dir/droiddeck-cjk
+mkdir -p "$conf_dir/conf.d" "$fonts_dir" "$cache_dir" 2>/dev/null
+
+# The default rules (sans-serif -> DejaVu Sans and the rest) live as links in /etc/fonts/conf.d,
+# and the rootfs has none. Linked by name, so a file we ship is never overwritten.
+if [ -d "$defaults_dir" ]; then
+  for f in "$defaults_dir"/*.conf; do
+    [ -e "$f" ] || continue
+    [ -e "$conf_dir/conf.d/${f##*/}" ] || ln -sf "$f" "$conf_dir/conf.d/${f##*/}"
+  done
+fi
+
+# Whether the app bound any CJK font this session; without one, local.conf is DejaVu alone.
+have_cjk=
+for f in "$cjk_dir"/*.ttc "$cjk_dir"/*.ttf "$cjk_dir"/*.otf; do
+  [ -f "$f" ] && have_cjk=1
+done
+
+# The stock Android CJK font is one .ttc whose SC, TC, JP, KR and HK faces are separate families;
+# naming them all lets fontconfig and the toolkits pick the glyph shapes for the text's language
+# instead of drawing every language with whichever face sorted first.
+cjk_families() {
+  local base lang
+  case $1 in
+    serif) base="Noto Serif CJK" ;;
+    mono) base="Noto Sans Mono CJK" ;;
+    *) base="Noto Sans CJK" ;;
+  esac
+  for lang in SC TC JP KR HK; do echo "$base $lang"; done
+}
+
+local_conf=$conf_dir/local.conf
+{
+  echo '<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd"><fontconfig>'
+  for generic in sans-serif sans serif monospace mono cursive fantasy system-ui ui-sans-serif; do
+    case $generic in
+      serif) face="DejaVu Serif"; kind=serif ;;
+      mono*|ui-mono) face="DejaVu Sans Mono"; kind=mono ;;
+      *) face="DejaVu Sans"; kind=sans ;;
+    esac
+    printf '<alias binding="weak"><family>%s</family><prefer><family>%s</family>' "$generic" "$face"
+    if [ -n "$have_cjk" ]; then
+      while read -r family; do printf '<family>%s</family>' "$family"; done < <(cjk_families "$kind")
+    fi
+    printf '</prefer></alias>\n'
+  done
+  # Named explicitly as well: the parent directory's cache may predate the bound subdirectory.
+  [ -n "$have_cjk" ] && echo '<dir>/usr/share/fonts/droiddeck-cjk</dir>'
+  echo '</fontconfig>'
+} > "$local_conf.new"
+if ! cmp -s "$local_conf.new" "$local_conf" 2>/dev/null; then
+  mv -f "$local_conf.new" "$local_conf"
+  echo "== fontconfig: wrote local.conf ($([ -n "$have_cjk" ] && echo 'DejaVu + CJK fallback' || echo 'DejaVu default'))"
+fi
+rm -f "$local_conf.new"
+
+# The cache in the image was built before any of this; rebuild it once per set of font files (a
+# device font update changes the listing) and mark it so the desktop does not rebuild it again.
+# Only inside a real session: fc-cache reads /etc/fonts, not the root the tests pass.
+if [ "$root" = / ] && command -v fc-cache >/dev/null 2>&1; then
+  want=$(find /usr/share/fonts -type f \( -name '*.ttc' -o -name '*.ttf' -o -name '*.otf' \) 2>/dev/null | sort | cksum)
+  if [ "$(cat "$cache_dir/.droiddeck-fonts" 2>/dev/null)" != "$want" ]; then
+    fc-cache -f >/dev/null 2>&1 && printf '%s\n' "$want" > "$cache_dir/.droiddeck-fonts"
+    echo "== fontconfig: cache rebuilt, default sans is $(fc-match sans-serif 2>/dev/null)"
+  fi
+  : > "$cache_dir/.droiddeck-built"
+fi

@@ -37,6 +37,7 @@ object SessionFiles {
             "libfakeinput.so" to "usr/local/lib/libfakeinput.so",
             "libblfastpath.so" to "usr/local/lib/libblfastpath.so",
             "usr/local/bin/droiddeck-session" to "usr/local/bin/droiddeck-session",
+            "usr/local/bin/droiddeck-fonts" to "usr/local/bin/droiddeck-fonts",
             "usr/local/bin/steam-compatibility" to "usr/local/bin/steam-compatibility",
             "usr/local/bin/droiddeck-clipboard" to "usr/local/bin/droiddeck-clipboard",
             "usr/local/bin/droiddeck-steam-install" to "usr/local/bin/droiddeck-steam-install",

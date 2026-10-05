@@ -132,7 +132,14 @@ program_cores() {
   echo "$list"
 }
 
+# Fonts. The rootfs ships DejaVu alone and no rules for a default family, and DejaVu has no CJK
+# glyphs: without the first, Gecko reports "no fonts" and draws pages without text; without the
+# second, Chinese, Japanese and Korean draw as tofu boxes (issues #118, #206, #249). The app binds
+# the device's own CJK fonts under /usr/share/fonts/droiddeck-cjk (LinuxRuntime.bindCjkFonts) and
+# droiddeck-fonts names them after DejaVu in fontconfig's fallback list and rebuilds the cache.
+# The outer pass only, so it is done before any program that queries fontconfig starts.
 if [ -z "${BL_INSIDE:-}" ]; then
+  /usr/local/bin/droiddeck-fonts 2>&1 | sed 's/^/[fonts] /'
   # The compositor may still be starting, and a socket left by an earlier session is not
   # a compositor: probe until a connection succeeds.
   for _ in $(seq 1 100); do
