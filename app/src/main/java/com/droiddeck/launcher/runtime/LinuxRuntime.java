@@ -267,7 +267,7 @@ public final class LinuxRuntime {
         bindGpuNode(context, cmd);
         bindAdrenoStats(cmd, extraBinds);
         bindCpuTemps(cmd, root);
-        bindCjkFonts(context, cmd);
+        bindDeviceFonts(context, cmd);
         if (extraBinds != null) {
             for (String spec : extraBinds) bind(cmd, spec);
         }
@@ -436,57 +436,25 @@ public final class LinuxRuntime {
     }
 
     /**
-     * The device's own CJK fonts, bound into the runtime's font directory. The rootfs ships DejaVu
-     * alone, and DejaVu has no CJK glyphs: with the client or the desktop in Chinese, Japanese or
-     * Korean, fontconfig hands the toolkit a sans-serif that cannot draw a single character and
-     * every one comes back a tofu box (issues #118, #206, #249). Android already carries a Noto
-     * CJK font - one .ttc holding the SC, TC, JP, KR and HK faces - and it is world-readable, so
-     * binding it adds nothing to the ~790 MB runtime image and follows whatever language coverage
-     * the device was built with. The session's font bootstrap (droiddeck-session) then names these
-     * families after DejaVu in fontconfig's fallback list.
+     * The device's own fonts, bound into the runtime as a whole directory. The rootfs ships DejaVu
+     * alone, which has no CJK glyphs and no Thai or Arabic: with the client or the desktop in one
+     * of those languages, fontconfig hands the toolkit a font that cannot draw a character and
+     * every one comes back a tofu box (issues #118, #206, #249). Android already carries the Noto
+     * set - one Noto CJK .ttc holds the SC, TC, JP, KR and HK faces, plus Thai, Arabic, Devanagari
+     * and the emoji fonts - all world-readable, so binding the directory adds nothing to the
+     * ~790 MB runtime image and follows whatever coverage the device was built with.
+     *
+     * <p>One directory binding, not one per file: proot does not apply a per-file binding into a
+     * plain directory here - the guest sees an empty placeholder where the font should be, and
+     * fontconfig then finds nothing (Chinese stayed tofu with exactly that binding, and fc-scan
+     * reported a zero-byte file). A directory binding is what every other bind here relies on.
      */
-    private static void bindCjkFonts(Context context, List<String> cmd) {
-        List<File> fonts = cjkFonts();
-        if (fonts.isEmpty()) return;
-        File dir = new File(rootDir(context), "usr/share/fonts/droiddeck-cjk");
+    private static void bindDeviceFonts(Context context, List<String> cmd) {
+        File deviceFonts = new File("/system/fonts");
+        if (!deviceFonts.isDirectory()) return;
+        File dir = new File(rootDir(context), "usr/share/fonts/droiddeck-device");
         if (!dir.isDirectory() && !dir.mkdirs()) return;
-        for (File font : fonts) {
-            bind(cmd, font.getPath() + ":" + new File(dir, font.getName()).getPath());
-        }
-        android.util.Log.i("LinuxRuntime", "fonts: bound " + fonts.size() + " device CJK font(s): " + fontNames(fonts));
-    }
-
-    /**
-     * The readable CJK-capable font files under Android's font directories. The stock font is
-     * NotoSansCJK-Regular.ttc (SC/TC/JP/KR/HK in one file); older devices carry DroidSansFallback
-     * and some OEMs Source Han. One entry per file name, the later directory not replacing an
-     * earlier one, so a vendor copy of a stock font wins but is not bound twice.
-     */
-    private static List<File> cjkFonts() {
-        java.util.LinkedHashMap<String, File> byName = new java.util.LinkedHashMap<>();
-        for (String directory : new String[]{"/system/fonts", "/product/fonts", "/system_ext/fonts"}) {
-            File[] files = new File(directory).listFiles();
-            if (files == null) continue;
-            for (File file : files) {
-                String name = file.getName().toLowerCase(java.util.Locale.ROOT);
-                boolean font = name.endsWith(".ttf") || name.endsWith(".ttc") || name.endsWith(".otf");
-                boolean cjk = name.contains("cjk") || name.contains("droidsansfallback")
-                        || name.contains("sourcehansans") || name.contains("sourcehanserif");
-                if (!font || !cjk || !file.canRead()) continue;
-                try {
-                    byName.putIfAbsent(file.getName(), new File(file.getCanonicalPath()));
-                } catch (IOException e) {
-                    byName.putIfAbsent(file.getName(), file);
-                }
-            }
-        }
-        return new ArrayList<>(byName.values());
-    }
-
-    private static String fontNames(List<File> fonts) {
-        StringBuilder names = new StringBuilder();
-        for (File font : fonts) names.append(names.length() == 0 ? "" : ", ").append(font.getName());
-        return names.toString();
+        bind(cmd, deviceFonts.getPath() + ":/usr/share/fonts/droiddeck-device");
     }
 
     private static String firstReadable(String... paths) {

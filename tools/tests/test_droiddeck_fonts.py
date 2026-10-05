@@ -33,7 +33,7 @@ class DroidDeckFontsTest(unittest.TestCase):
         self.assertIn("<family>sans-serif</family><prefer><family>DejaVu Sans</family>", text)
         self.assertIn("<family>monospace</family><prefer><family>DejaVu Sans Mono</family>", text)
         self.assertNotIn("Noto Sans CJK", text)
-        self.assertNotIn("droiddeck-cjk", text)
+        self.assertNotIn("droiddeck-device", text)
 
     def test_an_existing_conf_d_rule_is_not_replaced(self):
         conf_d = self.root / "etc/fonts/conf.d"
@@ -44,12 +44,12 @@ class DroidDeckFontsTest(unittest.TestCase):
         self.assertEqual("mine", (conf_d / "60-latin.conf").read_text())
 
     def test_a_bound_cjk_font_adds_the_fallback_and_directory(self):
-        cjk = self.root / "usr/share/fonts/droiddeck-cjk"
+        cjk = self.root / "usr/share/fonts/droiddeck-device"
         cjk.mkdir(parents=True)
         (cjk / "NotoSansCJK-Regular.ttc").write_text("cjk")
         self.run_fonts()
         text = self.local_conf()
-        self.assertIn("<dir>/usr/share/fonts/droiddeck-cjk</dir>", text)
+        self.assertIn("<dir>/usr/share/fonts/droiddeck-device</dir>", text)
         self.assertIn("<family>Noto Sans CJK SC</family>", text)
         self.assertIn("<family>Noto Serif CJK SC</family>", text)
         self.assertIn("<family>Noto Sans Mono CJK JP</family>", text)
