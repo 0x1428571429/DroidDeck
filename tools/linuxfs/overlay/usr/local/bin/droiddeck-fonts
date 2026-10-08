@@ -2,10 +2,10 @@
 # DroidDeck's fontconfig setup for the Linux runtime. The rootfs ships DejaVu alone and no rules
 # for a default family: applications then find fonts but no default, and Firefox logs "no fonts"
 # and draws pages without text. DejaVu also has no CJK, Thai or Arabic glyphs, so those draw as
-# tofu boxes. The device's own fonts are bound under /usr/share/fonts/droiddeck-device by the app
-# (LinuxRuntime.bindDeviceFonts); this script links fontconfig's default rules, writes
-# /etc/fonts/local.conf with DejaVu first and the CJK families after it, and rebuilds the cache
-# once per set of font files.
+# tofu boxes. The app binds Android's fonts for the session, which adds language-specific fallbacks
+# separately. This script links fontconfig's default rules and writes generic DejaVu aliases to an
+# owned conf.d file. Fontconfig reads local.conf afterward, so user overrides keep precedence and
+# are never replaced.
 # The first argument is the root to set up, "/" in a session; the tests point it at a temp tree.
 set -u
 root=${1:-/}
@@ -14,11 +14,8 @@ root=${root%/}
 # real session ("/") still holds.
 [ -n "$root" ] || root=/
 conf_dir=$root/etc/fonts
-fonts_dir=$root/usr/share/fonts
-cache_dir=$root/var/cache/fontconfig
 defaults_dir=$root/usr/share/fontconfig/conf.default
-device_dir=$fonts_dir/droiddeck-device
-mkdir -p "$conf_dir/conf.d" "$fonts_dir" "$cache_dir" 2>/dev/null
+mkdir -p "$conf_dir/conf.d" 2>/dev/null
 
 # The default rules (sans-serif -> DejaVu Sans and the rest) live as links in /etc/fonts/conf.d,
 # and the rootfs has none. Linked by name, so a file we ship is never overwritten.
@@ -29,59 +26,21 @@ if [ -d "$defaults_dir" ]; then
   done
 fi
 
-# Whether the app bound the device fonts this session; without them, local.conf is DejaVu alone.
-have_fonts=
-for f in "$device_dir"/*.ttc "$device_dir"/*.ttf "$device_dir"/*.otf; do
-  [ -f "$f" ] && have_fonts=1
-done
-
-# The device's CJK font is one .ttc whose SC, TC, JP, KR and HK faces are separate families;
-# naming them all lets fontconfig and the toolkits pick the glyph shapes for the text's language
-# instead of drawing every language with whichever face sorted first. Thai and the rest resolve by
-# coverage once the whole directory is in the config, so only the CJK faces are named.
-cjk_families() {
-  local base lang
-  case $1 in
-    serif) base="Noto Serif CJK" ;;
-    mono) base="Noto Sans Mono CJK" ;;
-    *) base="Noto Sans CJK" ;;
-  esac
-  for lang in SC TC JP KR HK; do echo "$base $lang"; done
-}
-
-local_conf=$conf_dir/local.conf
+owned_conf=$conf_dir/conf.d/65-droiddeck-default-fonts.conf
 {
   echo '<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd"><fontconfig>'
   for generic in sans-serif sans serif monospace mono cursive fantasy system-ui ui-sans-serif; do
     case $generic in
-      serif) face="DejaVu Serif"; kind=serif ;;
-      mono*|ui-mono) face="DejaVu Sans Mono"; kind=mono ;;
-      *) face="DejaVu Sans"; kind=sans ;;
+      serif) face="DejaVu Serif" ;;
+      mono*|ui-mono) face="DejaVu Sans Mono" ;;
+      *) face="DejaVu Sans" ;;
     esac
-    printf '<alias binding="weak"><family>%s</family><prefer><family>%s</family>' "$generic" "$face"
-    if [ -n "$have_fonts" ]; then
-      while read -r family; do printf '<family>%s</family>' "$family"; done < <(cjk_families "$kind")
-    fi
-    printf '</prefer></alias>\n'
+    printf '<alias binding="weak"><family>%s</family><prefer><family>%s</family></prefer></alias>\n' "$generic" "$face"
   done
-  # Named explicitly as well: the parent directory's cache may predate the bound subdirectory.
-  [ -n "$have_fonts" ] && echo '<dir>/usr/share/fonts/droiddeck-device</dir>'
   echo '</fontconfig>'
-} > "$local_conf.new"
-if ! cmp -s "$local_conf.new" "$local_conf" 2>/dev/null; then
-  mv -f "$local_conf.new" "$local_conf"
-  echo "== fontconfig: wrote local.conf ($([ -n "$have_fonts" ] && echo 'DejaVu + device fonts' || echo 'DejaVu default'))"
+} > "$owned_conf.new"
+if ! cmp -s "$owned_conf.new" "$owned_conf" 2>/dev/null; then
+  mv -f "$owned_conf.new" "$owned_conf"
+  echo "== fontconfig: wrote DejaVu defaults"
 fi
-rm -f "$local_conf.new"
-
-# The cache in the image was built before any of this; rebuild it once per set of font files (a
-# device font update changes the listing) and mark it so the desktop does not rebuild it again.
-# Only inside a real session: fc-cache reads /etc/fonts, not the root the tests pass.
-if [ "$root" = / ] && command -v fc-cache >/dev/null 2>&1; then
-  want=$(find /usr/share/fonts -type f \( -name '*.ttc' -o -name '*.ttf' -o -name '*.otf' \) 2>/dev/null | sort | cksum)
-  if [ "$(cat "$cache_dir/.droiddeck-fonts" 2>/dev/null)" != "$want" ]; then
-    fc-cache -f >/dev/null 2>&1 && printf '%s\n' "$want" > "$cache_dir/.droiddeck-fonts"
-    echo "== fontconfig: cache rebuilt: sans=$(fc-match -f '%{family}' sans-serif 2>/dev/null) zh=$(fc-match -f '%{family}' ':lang=zh-cn' 2>/dev/null) th=$(fc-match -f '%{family}' ':lang=th' 2>/dev/null)"
-  fi
-  : > "$cache_dir/.droiddeck-built"
-fi
+rm -f "$owned_conf.new"

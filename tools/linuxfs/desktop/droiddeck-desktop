@@ -84,9 +84,9 @@ fi
 # already running and exit without a word - a desktop with a wallpaper and nothing on it.
 # Only the app's own compositor socket (wayland-0) is kept.
 find "$XDG_RUNTIME_DIR" -mindepth 1 -maxdepth 1 ! -name 'wayland-0*' ! -name 'keymap.xkb' -exec rm -rf {} + 2>/dev/null
-# fontconfig's rules and its default and CJK fallback families are set up by droiddeck-session
-# before this script runs (droiddeck-fonts): the links in /etc/fonts/conf.d, /etc/fonts/local.conf
-# and the cache are its to own across every mode, not the desktop's alone.
+# Fontconfig defaults and Android language fallbacks are set up by droiddeck-session before this
+# script or any desktop program starts. The generated defaults live in conf.d, leaving local.conf
+# available for the user's own final overrides.
 # The menu's "Steam" / "Steam Big Picture" entries and one entry per installed game: all of them
 # hand off to the app (droiddeck-steam-launch), since the client cannot draw on this desktop.
 export BL_DESKTOP=1

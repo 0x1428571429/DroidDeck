@@ -42,6 +42,8 @@ public final class LinuxRuntime {
      * session ended at once. A long host path behind it is proot's to shorten.
      */
     public static final String GUEST_RUNTIME_DIR = "/run/droiddeck";
+    private static final String SYSTEM_FONTS = "/system/fonts";
+    private static final String GUEST_SYSTEM_FONTS = "/usr/local/share/fonts/android";
     /** Where every Linux session's debug log lands: public, so a user can just hand the folder over. */
     public static final String DEBUG_LOG_DIR = "DroidDeck";
 
@@ -207,6 +209,7 @@ public final class LinuxRuntime {
         File shm = new File(context.getCacheDir(), "shm");
         shm.mkdirs();
         bind(cmd, shm.getPath() + ":/dev/shm");
+        bindSystemFonts(cmd, root);
 
         // Android denies apps these; glibc, Steam and libcap read them at startup.
         File fakeProc = new File(root, "etc/droiddeck/proc");
@@ -267,7 +270,6 @@ public final class LinuxRuntime {
         bindGpuNode(context, cmd);
         bindAdrenoStats(cmd, extraBinds);
         bindCpuTemps(cmd, root);
-        bindDeviceFonts(context, cmd);
         if (extraBinds != null) {
             for (String spec : extraBinds) bind(cmd, spec);
         }
@@ -435,28 +437,6 @@ public final class LinuxRuntime {
         }
     }
 
-    /**
-     * The device's own fonts, bound into the runtime as a whole directory. The rootfs ships DejaVu
-     * alone, which has no CJK glyphs and no Thai or Arabic: with the client or the desktop in one
-     * of those languages, fontconfig hands the toolkit a font that cannot draw a character and
-     * every one comes back a tofu box (issues #118, #206, #249). Android already carries the Noto
-     * set - one Noto CJK .ttc holds the SC, TC, JP, KR and HK faces, plus Thai, Arabic, Devanagari
-     * and the emoji fonts - all world-readable, so binding the directory adds nothing to the
-     * ~790 MB runtime image and follows whatever coverage the device was built with.
-     *
-     * <p>One directory binding, not one per file: proot does not apply a per-file binding into a
-     * plain directory here - the guest sees an empty placeholder where the font should be, and
-     * fontconfig then finds nothing (Chinese stayed tofu with exactly that binding, and fc-scan
-     * reported a zero-byte file). A directory binding is what every other bind here relies on.
-     */
-    private static void bindDeviceFonts(Context context, List<String> cmd) {
-        File deviceFonts = new File("/system/fonts");
-        if (!deviceFonts.isDirectory()) return;
-        File dir = new File(rootDir(context), "usr/share/fonts/droiddeck-device");
-        if (!dir.isDirectory() && !dir.mkdirs()) return;
-        bind(cmd, deviceFonts.getPath() + ":/usr/share/fonts/droiddeck-device");
-    }
-
     private static String firstReadable(String... paths) {
         for (String path : paths) {
             if (path != null && new File(path).canRead()) return path;
@@ -486,6 +466,15 @@ public final class LinuxRuntime {
             }
         }
         return byType;
+    }
+
+    private static void bindSystemFonts(List<String> cmd, File root) {
+        File fonts = new File(SYSTEM_FONTS);
+        File target = new File(root, GUEST_SYSTEM_FONTS.substring(1));
+        if (!fonts.isDirectory() || !fonts.canRead() || !new File(root, "usr/local").isDirectory()) return;
+        if (target.isDirectory() || target.mkdirs()) {
+            bind(cmd, SYSTEM_FONTS + ":" + GUEST_SYSTEM_FONTS);
+        }
     }
 
     private static void bind(List<String> cmd, String spec) {
